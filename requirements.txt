@@ -1,0 +1,14 @@
+# fastapi==0.115.5
+# uvicorn[standard]==0.23.2
+# pydantic==1.10.14
+# SQLAlchemy==2.0.23
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+pydantic>=2
+python-dotenv
+# openai>=1.12.0
+pydantic-settings
+# openai
+plotly
