@@ -3,5 +3,4 @@ __pycache__/
 .DS_Store
 config/metadata.json
 app/agents/viz_agent.py
-app/agents/sql_agent.py
 app/config.py
