@@ -9,6 +9,7 @@ from app.agents.sql_agent import SQLAgent, SQLResult
 from app.agents.viz_agent import VizAgent, VisualizationResult
 from app.db import execute_readonly_query
 from app.config import settings
+from app.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,16 @@ class QueryService:
     def __init__(self, kb: Optional[KnowledgeBase] = None):
         self.kb = kb or KnowledgeBase()
         self.router = RouterAgent()
-        self.sql_agent = SQLAgent(self.kb)
+        self.vector_store: Optional[VectorStore] = None
+        try:
+            self.vector_store = VectorStore()
+            self.vector_store.sync_metadata(self.kb._data)
+        except Exception as exc:
+            # Don't block the app if vector bootstrap fails.
+            logger.warning("Vector store bootstrap failed: %s", exc)
+            self.vector_store = None
+
+        self.sql_agent = SQLAgent(self.kb, vector_store=self.vector_store)
         self.viz_agent = VizAgent(self.kb)
         self.cache: Optional[Dict[str, List[Dict[str, Any]]]] = {} if settings.enable_query_cache else None
 
