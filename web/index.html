@@ -4,407 +4,43 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MovieLens NL2SQL</title>
+  <link rel="stylesheet" href="styles.css" />
   <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-  <style>
-    :root {
-      --bg: #0d1117;
-      --panel: #1f2933;
-      --panel-strong: #131920;
-      --text: #e5e7eb;
-      --muted: #9ca3af;
-      --accent: #3b82f6;
-      --accent-2: #10b981;
-      --pill: #111827;
-      --border: #2a3542;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: radial-gradient(circle at 20% 20%, rgba(59,130,246,0.08), transparent 25%),
-                  radial-gradient(circle at 80% 0%, rgba(16,185,129,0.08), transparent 22%),
-                  var(--bg);
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 32px 16px 48px;
-    }
-    .wrap {
-      width: min(1100px, 95vw);
-      text-align: center;
-    }
-    h1 {
-      font-weight: 700;
-      margin-bottom: 12px;
-      color: #f8fafc;
-      letter-spacing: 0.4px;
-    }
-    .subtitle {
-      margin: 0 0 18px;
-      color: var(--muted);
-      font-size: 14px;
-    }
-    .card {
-      background: linear-gradient(135deg, var(--panel), var(--panel-strong));
-      border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 22px;
-      padding: 18px 22px;
-      box-shadow: 0 22px 50px rgba(0,0,0,0.35);
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      backdrop-filter: blur(4px);
-    }
-    .pill {
-      flex: 1;
-      background: #0e1524;
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 12px 16px;
-      color: var(--text);
-      outline: none;
-      font-size: 16px;
-      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
-    }
-    .pill:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(59,130,246,0.18);
-      background: #10192b;
-    }
-    .badge {
-      background: var(--pill);
-      color: var(--text);
-      border-radius: 12px;
-      padding: 7px 12px;
-      border: 1px solid var(--border);
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-    }
-    .badge .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--accent);
-    }
-    button {
-      border: none;
-      cursor: pointer;
-      background: linear-gradient(135deg, #3b82f6, #2563eb);
-      color: white;
-      border-radius: 14px;
-      padding: 10px 14px;
-      min-width: 44px;
-      min-height: 44px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 15px;
-      box-shadow: 0 10px 25px rgba(59,130,246,0.35);
-      transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
-    }
-    button:active { transform: translateY(1px); }
-    button:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
-    .mic {
-      background: #0b1020;
-      border: 1px solid var(--border);
-      color: var(--text);
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
-    }
-    .status {
-      margin-top: 18px;
-      color: var(--muted);
-      font-size: 14px;
-      min-height: 18px;
-    }
-    .panel {
-      margin-top: 24px;
-      background: linear-gradient(135deg, #0f1724, #0a0f1a);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 18px;
-      padding: 16px;
-      text-align: left;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      box-shadow: 0 18px 40px rgba(0,0,0,0.32);
-    }
-    .pane {
-      background: #0b1220;
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 12px;
-      padding: 12px;
-      color: #d1d5db;
-      overflow: hidden;
-      font-size: 13px;
-      min-height: 60px;
-      max-height: 320px;
-    }
-    #chart {
-      margin-top: 8px;
-      background: #0b1220;
-      border-radius: 12px;
-      padding: 10px;
-      border: 1px solid rgba(255,255,255,0.08);
-      color: #9ca3af;
-      min-height: 320px;
-      overflow: hidden;
-    }
-    .chart-wrapper {
-      background: white;
-      border-radius: 12px;
-      min-height: 320px;
-      padding: 8px;
-      box-shadow: inset 0 0 0 1px #e5e7eb;
-    }
-    .small {
-      font-size: 13px;
-      color: var(--muted);
-    }
-    .table-wrap {
-      max-height: 280px;
-      overflow: auto;
-      border-radius: 10px;
-      border: 1px solid rgba(255,255,255,0.08);
-      background: rgba(255,255,255,0.02);
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-      color: #e5e7eb;
-    }
-    thead {
-      position: sticky;
-      top: 0;
-      background: rgba(255,255,255,0.06);
-      backdrop-filter: blur(4px);
-    }
-    th, td {
-      padding: 8px 10px;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
-      text-align: left;
-      white-space: nowrap;
-    }
-    tbody tr:nth-child(odd) td {
-      background: rgba(255,255,255,0.02);
-    }
-    .muted {
-      color: var(--muted);
-    }
-    details.collapsible {
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 12px;
-      padding: 10px 12px;
-      background: rgba(255,255,255,0.02);
-    }
-    details.collapsible summary {
-      cursor: pointer;
-      color: var(--muted);
-      font-size: 13px;
-      outline: none;
-    }
-    details.collapsible[open] summary {
-      color: var(--text);
-    }
-    details.collapsible pre {
-      margin-top: 10px;
-      background: #0b1220;
-      border-radius: 10px;
-      padding: 10px;
-      border: 1px solid rgba(255,255,255,0.08);
-      color: #e5e7eb;
-      overflow: auto;
-    }
-  </style>
+  <script src="app.js" defer></script>
 </head>
 <body>
   <div class="wrap">
     <h1>Chat With Your Data.</h1>
     <div class="card">
       <input id="question" class="pill" placeholder="Ask anything about your data." autocomplete="off" />
-      <button id="send" title="Send">➤</button>
+      <button id="send" title="Send">
+        <span class="spinner" aria-hidden="true"></span>
+        <span class="label">➤</span>
+      </button>
+      <button id="clear" class="ghost" title="Clear">Clear</button>
     </div>
     <div class="status" id="status"></div>
     <div class="panel">
-      <details id="sql-details" class="collapsible">
-        <summary>SQL (click to expand)</summary>
-        <pre id="sql">—</pre>
-      </details>
-      <details id="rows-details" class="collapsible">
-        <summary>Rows (click to expand)</summary>
-        <div id="rows" class="pane">—</div>
-      </details>
+      <div class="section-row">
+        <details id="sql-details" class="collapsible">
+          <summary>SQL (click to expand)</summary>
+          <pre id="sql">—</pre>
+        </details>
+        <button id="copy-sql" class="ghost" title="Copy SQL">Copy</button>
+      </div>
+      <div class="section-row">
+        <details id="rows-details" class="collapsible">
+          <summary>Rows (click to expand)</summary>
+          <div id="rows" class="pane">—</div>
+        </details>
+        <button id="copy-rows" class="ghost" title="Copy rows">Copy</button>
+      </div>
       <details id="figure-details" class="collapsible">
         <summary>Figure (click to expand)</summary>
         <div id="chart">No figure yet.</div>
       </details>
     </div>
   </div>
-
-  <script>
-    const ui = (() => {
-      const elements = {
-        question: document.getElementById("question"),
-        send: document.getElementById("send"),
-        status: document.getElementById("status"),
-        sqlDetails: document.getElementById("sql-details"),
-        sql: document.getElementById("sql"),
-        rowsDetails: document.getElementById("rows-details"),
-        rows: document.getElementById("rows"),
-        figureDetails: document.getElementById("figure-details"),
-        chart: document.getElementById("chart"),
-      };
-
-      const setStatus = (text) => {
-        elements.status.textContent = text || "";
-      };
-
-      const setSQL = (sql) => {
-        elements.sql.textContent = sql || "—";
-        elements.sqlDetails.open = false;
-      };
-
-      const clearRows = () => {
-        elements.rows.textContent = "—";
-        elements.rowsDetails.open = false;
-      };
-
-      const clearFigure = (message = "No figure yet.") => {
-        elements.chart.innerHTML = message;
-        elements.figureDetails.open = false;
-      };
-
-      const renderTable = (rows) => {
-        if (!rows || rows.length === 0) {
-          elements.rows.innerHTML = '<div class="muted">No rows returned.</div>';
-          return;
-        }
-
-        const columns = Array.from(
-          rows.reduce((set, row) => {
-            Object.keys(row || {}).forEach((k) => set.add(k));
-            return set;
-          }, new Set())
-        );
-
-        const table = document.createElement("table");
-        const thead = document.createElement("thead");
-        const headerRow = document.createElement("tr");
-        columns.forEach((col) => {
-          const th = document.createElement("th");
-          th.textContent = col;
-          headerRow.appendChild(th);
-        });
-        thead.appendChild(headerRow);
-        table.appendChild(thead);
-
-        const tbody = document.createElement("tbody");
-        rows.forEach((row) => {
-          const tr = document.createElement("tr");
-          columns.forEach((col) => {
-            const td = document.createElement("td");
-            const value = row[col];
-            td.textContent = value === null || value === undefined ? "—" : value;
-            tr.appendChild(td);
-          });
-          tbody.appendChild(tr);
-        });
-        table.appendChild(tbody);
-
-        const wrap = document.createElement("div");
-        wrap.className = "table-wrap";
-        wrap.appendChild(table);
-
-        elements.rows.innerHTML = "";
-        elements.rows.appendChild(wrap);
-      };
-
-      const renderRows = (rows, intent) => {
-        if (intent === "visualization") {
-          elements.rows.textContent = "Visualization shown below.";
-          elements.rowsDetails.open = false;
-          return;
-        }
-        renderTable(rows);
-      };
-
-      const renderFigure = (figure, intent) => {
-        if (!figure) {
-          clearFigure("No figure returned.");
-          return;
-        }
-
-        const layout = Object.assign(
-          {
-            autosize: true,
-            margin: { l: 50, r: 30, t: 50, b: 50 },
-            paper_bgcolor: intent === "visualization" ? "white" : "rgba(0,0,0,0)",
-            plot_bgcolor: intent === "visualization" ? "white" : "rgba(0,0,0,0)",
-          },
-          figure.layout || {}
-        );
-
-        elements.chart.innerHTML = "";
-        const wrapper = document.createElement("div");
-        wrapper.className = "chart-wrapper";
-        elements.chart.appendChild(wrapper);
-        Plotly.newPlot(wrapper, figure.data || [], layout, { displaylogo: false, responsive: true });
-      };
-
-      const reset = () => {
-        setStatus("Thinking…");
-        setSQL("—");
-        clearRows();
-        clearFigure();
-      };
-
-      return { elements, setStatus, setSQL, renderRows, renderFigure, reset };
-    })();
-
-    async function fetchQuery(question) {
-      const resp = await fetch("/api/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, execute: true }),
-      });
-
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.detail || "Request failed");
-      }
-      return data;
-    }
-
-    async function handleSend() {
-      const question = ui.elements.question.value.trim();
-      if (!question) return;
-
-      ui.elements.send.disabled = true;
-      ui.reset();
-
-      try {
-        const data = await fetchQuery(question);
-        const intent = data.intent || "";
-
-        ui.setSQL(data.sql || "—");
-        ui.renderRows(data.rows || [], intent);
-        ui.renderFigure(data.figure, intent);
-        ui.setStatus(`Intent: ${intent || "unknown"}`);
-      } catch (err) {
-        ui.setStatus(err.message || "Something went wrong.");
-      } finally {
-        ui.elements.send.disabled = false;
-      }
-    }
-
-    ui.elements.send.addEventListener("click", handleSend);
-    ui.elements.question.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") handleSend();
-    });
-  </script>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
