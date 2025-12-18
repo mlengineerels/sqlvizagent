@@ -22,7 +22,9 @@
       margin: 0;
       min-height: 100vh;
       font-family: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
+      background: radial-gradient(circle at 20% 20%, rgba(59,130,246,0.08), transparent 25%),
+                  radial-gradient(circle at 80% 0%, rgba(16,185,129,0.08), transparent 22%),
+                  var(--bg);
       color: var(--text);
       display: flex;
       align-items: center;
@@ -34,35 +36,42 @@
       text-align: center;
     }
     h1 {
-      font-weight: 600;
-      margin-bottom: 28px;
-      color: #f3f4f6;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: #f8fafc;
       letter-spacing: 0.4px;
+    }
+    .subtitle {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 14px;
     }
     .card {
       background: linear-gradient(135deg, var(--panel), var(--panel-strong));
-      border: 1px solid var(--border);
+      border: 1px solid rgba(255,255,255,0.06);
       border-radius: 22px;
       padding: 18px 22px;
-      box-shadow: 0 20px 50px rgba(0,0,0,0.35);
+      box-shadow: 0 22px 50px rgba(0,0,0,0.35);
       display: flex;
       align-items: center;
       gap: 12px;
+      backdrop-filter: blur(4px);
     }
     .pill {
       flex: 1;
-      background: #111820;
+      background: #0e1524;
       border: 1px solid var(--border);
       border-radius: 16px;
       padding: 12px 16px;
       color: var(--text);
       outline: none;
       font-size: 16px;
-      transition: border-color 0.2s, box-shadow 0.2s;
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
     }
     .pill:focus {
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.18);
+      background: #10192b;
     }
     .badge {
       background: var(--pill);
@@ -84,7 +93,7 @@
     button {
       border: none;
       cursor: pointer;
-      background: var(--accent);
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
       color: white;
       border-radius: 14px;
       padding: 10px 14px;
@@ -98,7 +107,7 @@
       transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
     }
     button:active { transform: translateY(1px); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
     .mic {
       background: #0b1020;
       border: 1px solid var(--border);
@@ -113,31 +122,33 @@
     }
     .panel {
       margin-top: 24px;
-      background: #0f1620;
-      border: 1px solid var(--border);
-      border-radius: 16px;
+      background: linear-gradient(135deg, #0f1724, #0a0f1a);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 18px;
       padding: 16px;
       text-align: left;
       display: flex;
       flex-direction: column;
       gap: 10px;
+      box-shadow: 0 18px 40px rgba(0,0,0,0.32);
     }
     .pane {
       background: #0b1220;
-      border: 1px solid var(--border);
+      border: 1px solid rgba(255,255,255,0.08);
       border-radius: 12px;
       padding: 12px;
       color: #d1d5db;
-      overflow-x: auto;
+      overflow: auto;
       font-size: 13px;
       min-height: 60px;
+      max-height: 320px;
     }
     #chart {
       margin-top: 8px;
       background: #0b1220;
       border-radius: 12px;
       padding: 10px;
-      border: 1px solid var(--border);
+      border: 1px solid rgba(255,255,255,0.08);
       color: #9ca3af;
       min-height: 320px;
       overflow: hidden;
@@ -157,9 +168,9 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Ready when you are.</h1>
+    <h1>Chat With Your Data.</h1>
     <div class="card">
-      <input id="question" class="pill" placeholder="Ask anything" autocomplete="off" />
+      <input id="question" class="pill" placeholder="Ask anything about your data." autocomplete="off" />
       <button id="send" title="Send">➤</button>
     </div>
     <div class="status" id="status"></div>

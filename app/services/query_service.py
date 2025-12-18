@@ -9,6 +9,7 @@ from app.agents.sql_agent import SQLAgent, SQLResult
 from app.agents.viz_agent import VizAgent, VisualizationResult
 from app.db import execute_readonly_query
 from app.config import settings
+from app.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +22,17 @@ class QueryResponse:
 
 class QueryService:
     def __init__(self, kb: Optional[KnowledgeBase] = None):
-        self.kb = kb or KnowledgeBase()
+        # Vector-only KB; assumes embeddings are pre-populated externally.
+        self.vector_store: Optional[VectorStore] = None
+        try:
+            self.vector_store = VectorStore()
+        except Exception as exc:
+            logger.warning("Vector store init failed: %s", exc)
+            self.vector_store = None
+
+        self.kb = kb or KnowledgeBase(vector_store=self.vector_store)
         self.router = RouterAgent()
-        self.sql_agent = SQLAgent(self.kb)
+        self.sql_agent = SQLAgent(self.kb, vector_store=self.vector_store)
         self.viz_agent = VizAgent(self.kb)
         self.cache: Optional[Dict[str, List[Dict[str, Any]]]] = {} if settings.enable_query_cache else None
 
