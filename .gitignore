@@ -3,3 +3,5 @@ __pycache__/
 .DS_Store
 config/metadata.json
 app/config.py
+notes.txt
+

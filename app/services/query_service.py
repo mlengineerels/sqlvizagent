@@ -83,4 +83,7 @@ class QueryService:
 
             return QueryResponse(sql=sql_result.sql, rows=rows, intent=decision.intent)
 
-        raise ValueError(f"No suitable agent for intent '{decision.intent}'.")
+        raise ValueError(
+            "Sorry, no agent is available to handle this question. "
+            "Please try rephrasing or ask a data or visualization question."
+        )

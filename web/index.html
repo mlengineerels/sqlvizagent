@@ -138,7 +138,7 @@
       border-radius: 12px;
       padding: 12px;
       color: #d1d5db;
-      overflow: auto;
+      overflow: hidden;
       font-size: 13px;
       min-height: 60px;
       max-height: 320px;
@@ -164,6 +164,61 @@
       font-size: 13px;
       color: var(--muted);
     }
+    .table-wrap {
+      max-height: 280px;
+      overflow: auto;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.02);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      color: #e5e7eb;
+    }
+    thead {
+      position: sticky;
+      top: 0;
+      background: rgba(255,255,255,0.06);
+      backdrop-filter: blur(4px);
+    }
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      text-align: left;
+      white-space: nowrap;
+    }
+    tbody tr:nth-child(odd) td {
+      background: rgba(255,255,255,0.02);
+    }
+    .muted {
+      color: var(--muted);
+    }
+    details.collapsible {
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.02);
+    }
+    details.collapsible summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 13px;
+      outline: none;
+    }
+    details.collapsible[open] summary {
+      color: var(--text);
+    }
+    details.collapsible pre {
+      margin-top: 10px;
+      background: #0b1220;
+      border-radius: 10px;
+      padding: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      color: #e5e7eb;
+      overflow: auto;
+    }
   </style>
 </head>
 <body>
@@ -175,104 +230,180 @@
     </div>
     <div class="status" id="status"></div>
     <div class="panel">
-      <div class="small">SQL</div>
-      <pre id="sql">—</pre>
-      <div class="small">Rows</div>
-      <div id="rows" class="pane">—</div>
-      <div class="small">Figure</div>
-      <div id="chart">No figure yet.</div>
+      <details id="sql-details" class="collapsible">
+        <summary>SQL (click to expand)</summary>
+        <pre id="sql">—</pre>
+      </details>
+      <details id="rows-details" class="collapsible">
+        <summary>Rows (click to expand)</summary>
+        <div id="rows" class="pane">—</div>
+      </details>
+      <details id="figure-details" class="collapsible">
+        <summary>Figure (click to expand)</summary>
+        <div id="chart">No figure yet.</div>
+      </details>
     </div>
   </div>
 
   <script>
-    const questionInput = document.getElementById("question");
-    const sendBtn = document.getElementById("send");
-    const statusEl = document.getElementById("status");
-    const sqlEl = document.getElementById("sql");
-    const rowsEl = document.getElementById("rows");
-    const chartEl = document.getElementById("chart");
+    const ui = (() => {
+      const elements = {
+        question: document.getElementById("question"),
+        send: document.getElementById("send"),
+        status: document.getElementById("status"),
+        sqlDetails: document.getElementById("sql-details"),
+        sql: document.getElementById("sql"),
+        rowsDetails: document.getElementById("rows-details"),
+        rows: document.getElementById("rows"),
+        figureDetails: document.getElementById("figure-details"),
+        chart: document.getElementById("chart"),
+      };
 
-    async function sendQuery() {
-      const question = questionInput.value.trim();
+      const setStatus = (text) => {
+        elements.status.textContent = text || "";
+      };
+
+      const setSQL = (sql) => {
+        elements.sql.textContent = sql || "—";
+        elements.sqlDetails.open = false;
+      };
+
+      const clearRows = () => {
+        elements.rows.textContent = "—";
+        elements.rowsDetails.open = false;
+      };
+
+      const clearFigure = (message = "No figure yet.") => {
+        elements.chart.innerHTML = message;
+        elements.figureDetails.open = false;
+      };
+
+      const renderTable = (rows) => {
+        if (!rows || rows.length === 0) {
+          elements.rows.innerHTML = '<div class="muted">No rows returned.</div>';
+          return;
+        }
+
+        const columns = Array.from(
+          rows.reduce((set, row) => {
+            Object.keys(row || {}).forEach((k) => set.add(k));
+            return set;
+          }, new Set())
+        );
+
+        const table = document.createElement("table");
+        const thead = document.createElement("thead");
+        const headerRow = document.createElement("tr");
+        columns.forEach((col) => {
+          const th = document.createElement("th");
+          th.textContent = col;
+          headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        rows.forEach((row) => {
+          const tr = document.createElement("tr");
+          columns.forEach((col) => {
+            const td = document.createElement("td");
+            const value = row[col];
+            td.textContent = value === null || value === undefined ? "—" : value;
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+
+        const wrap = document.createElement("div");
+        wrap.className = "table-wrap";
+        wrap.appendChild(table);
+
+        elements.rows.innerHTML = "";
+        elements.rows.appendChild(wrap);
+      };
+
+      const renderRows = (rows, intent) => {
+        if (intent === "visualization") {
+          elements.rows.textContent = "Visualization shown below.";
+          elements.rowsDetails.open = false;
+          return;
+        }
+        renderTable(rows);
+      };
+
+      const renderFigure = (figure, intent) => {
+        if (!figure) {
+          clearFigure("No figure returned.");
+          return;
+        }
+
+        const layout = Object.assign(
+          {
+            autosize: true,
+            margin: { l: 50, r: 30, t: 50, b: 50 },
+            paper_bgcolor: intent === "visualization" ? "white" : "rgba(0,0,0,0)",
+            plot_bgcolor: intent === "visualization" ? "white" : "rgba(0,0,0,0)",
+          },
+          figure.layout || {}
+        );
+
+        elements.chart.innerHTML = "";
+        const wrapper = document.createElement("div");
+        wrapper.className = "chart-wrapper";
+        elements.chart.appendChild(wrapper);
+        Plotly.newPlot(wrapper, figure.data || [], layout, { displaylogo: false, responsive: true });
+      };
+
+      const reset = () => {
+        setStatus("Thinking…");
+        setSQL("—");
+        clearRows();
+        clearFigure();
+      };
+
+      return { elements, setStatus, setSQL, renderRows, renderFigure, reset };
+    })();
+
+    async function fetchQuery(question) {
+      const resp = await fetch("/api/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, execute: true }),
+      });
+
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.detail || "Request failed");
+      }
+      return data;
+    }
+
+    async function handleSend() {
+      const question = ui.elements.question.value.trim();
       if (!question) return;
 
-    sendBtn.disabled = true;
-    statusEl.textContent = "Thinking…";
-    sqlEl.textContent = "—";
-    rowsEl.textContent = "—";
-    chartEl.innerHTML = "No figure yet.";
+      ui.elements.send.disabled = true;
+      ui.reset();
 
       try {
-        const resp = await fetch("/api/query", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question, execute: true }),
-        });
-
-        const data = await resp.json();
-        if (!resp.ok) {
-          throw new Error(data.detail || "Request failed");
-        }
-
-        sqlEl.textContent = data.sql || "—";
+        const data = await fetchQuery(question);
         const intent = data.intent || "";
-        const hasFigure = !!data.figure;
 
-        if (intent === "visualization") {
-          rowsEl.textContent = "Visualization shown below.";
-          if (hasFigure) {
-            const fig = data.figure;
-            const layout = Object.assign(
-              {
-                autosize: true,
-                margin: {l: 50, r: 30, t: 50, b: 50},
-                paper_bgcolor: "white",
-                plot_bgcolor: "white",
-              },
-              fig.layout || {}
-            );
-            chartEl.innerHTML = "";
-            const wrapper = document.createElement("div");
-            wrapper.className = "chart-wrapper";
-            chartEl.appendChild(wrapper);
-            Plotly.newPlot(wrapper, fig.data || [], layout, {displaylogo: false, responsive: true});
-          } else {
-            chartEl.textContent = "No figure returned.";
-          }
-        } else {
-          rowsEl.textContent = JSON.stringify(data.rows || [], null, 2);
-          if (hasFigure) {
-            const fig = data.figure;
-            const layout = Object.assign(
-              {
-                autosize: true,
-                margin: {l: 50, r: 30, t: 50, b: 50},
-                paper_bgcolor: "rgba(0,0,0,0)",
-                plot_bgcolor: "rgba(0,0,0,0)",
-              },
-              fig.layout || {}
-            );
-            chartEl.innerHTML = "";
-            const wrapper = document.createElement("div");
-            wrapper.className = "chart-wrapper";
-            chartEl.appendChild(wrapper);
-            Plotly.newPlot(wrapper, fig.data || [], layout, {displaylogo: false, responsive: true});
-          } else {
-            chartEl.textContent = "No figure returned.";
-          }
-        }
-
-        statusEl.textContent = `Intent: ${intent || "unknown"}`;
+        ui.setSQL(data.sql || "—");
+        ui.renderRows(data.rows || [], intent);
+        ui.renderFigure(data.figure, intent);
+        ui.setStatus(`Intent: ${intent || "unknown"}`);
       } catch (err) {
-        statusEl.textContent = err.message || "Something went wrong.";
+        ui.setStatus(err.message || "Something went wrong.");
       } finally {
-        sendBtn.disabled = false;
+        ui.elements.send.disabled = false;
       }
     }
 
-    sendBtn.addEventListener("click", sendQuery);
-    questionInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") sendQuery();
+    ui.elements.send.addEventListener("click", handleSend);
+    ui.elements.question.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") handleSend();
     });
   </script>
 </body>
