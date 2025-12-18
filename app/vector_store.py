@@ -173,3 +173,28 @@ class VectorStore:
             if col_text:
                 lines.append(f"  Columns: {col_text}")
         return "\n".join(lines)
+
+    def get_all_entries(self) -> List[Dict[str, Any]]:
+        """Return all stored schema entries."""
+        with get_connection() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT name, object_type, schema_name, description, columns
+                    FROM schema_embeddings
+                    """
+                )
+            ).fetchall()
+        entries: List[Dict[str, Any]] = []
+        for row in rows:
+            name, obj_type, schema_name, description, columns_json = row
+            entries.append(
+                {
+                    "name": name,
+                    "object_type": obj_type,
+                    "schema": schema_name,
+                    "description": description,
+                    "columns": columns_json or [],
+                }
+            )
+        return entries

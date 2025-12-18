@@ -22,17 +22,16 @@ class QueryResponse:
 
 class QueryService:
     def __init__(self, kb: Optional[KnowledgeBase] = None):
-        self.kb = kb or KnowledgeBase()
-        self.router = RouterAgent()
+        # Vector-only KB; assumes embeddings are pre-populated externally.
         self.vector_store: Optional[VectorStore] = None
         try:
             self.vector_store = VectorStore()
-            self.vector_store.sync_metadata(self.kb._data)
         except Exception as exc:
-            # Don't block the app if vector bootstrap fails.
-            logger.warning("Vector store bootstrap failed: %s", exc)
+            logger.warning("Vector store init failed: %s", exc)
             self.vector_store = None
 
+        self.kb = kb or KnowledgeBase(vector_store=self.vector_store)
+        self.router = RouterAgent()
         self.sql_agent = SQLAgent(self.kb, vector_store=self.vector_store)
         self.viz_agent = VizAgent(self.kb)
         self.cache: Optional[Dict[str, List[Dict[str, Any]]]] = {} if settings.enable_query_cache else None
