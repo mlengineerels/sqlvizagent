@@ -4,4 +4,7 @@ __pycache__/
 config/metadata.json
 app/config.py
 notes.txt
+resp.json
+viz.html
+
 
