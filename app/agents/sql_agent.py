@@ -1,6 +1,6 @@
 # app/agents/sql_agent.py
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 
 import openai
@@ -36,9 +36,9 @@ class SQLAgent:
             self.client = None
             self.use_client = False
 
-    def _system_prompt(self, relevant_schema: str = "") -> str:
+    def _system_prompt(self, allowed_objects: List[str], relevant_schema: str = "") -> str:
         dialect = self.kb.dialect
-        allowed_objects = ", ".join(self.kb.allowed_objects()) or "the provided tables/views"
+        allowed_objects_str = ", ".join(allowed_objects) or "the provided tables/views"
 
         return f"""
 You are an expert {dialect} SQL query generator for the MovieLens dataset.
@@ -57,11 +57,12 @@ Schema context (from pgvector retrieval only):
 {relevant_schema or "None retrieved; use best judgment with allowed objects only."}
 """.strip()
 
-    def generate_sql(self, question: str) -> SQLResult:
+    def generate_sql(self, question: str, allowed_objects: Optional[List[str]] = None) -> SQLResult:
         relevant = ""
         if self.vector_store:
-            relevant = self.vector_store.get_relevant_schema(question, top_k=5)
-        system_prompt = self._system_prompt(relevant_schema=relevant)
+            relevant = self.vector_store.get_relevant_schema(question, top_k=3)
+        allowed = allowed_objects or self.kb.allowed_objects()
+        system_prompt = self._system_prompt(allowed_objects=allowed, relevant_schema=relevant)
 
         logger.info("Generating SQL for question: %s", question)
 

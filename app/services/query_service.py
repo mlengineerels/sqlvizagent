@@ -7,6 +7,7 @@ from app.agents.knowledge_base import KnowledgeBase
 from app.agents.router import RouterAgent
 from app.agents.sql_agent import SQLAgent, SQLResult
 from app.agents.viz_agent import VizAgent, VisualizationResult
+from app.agents.table_agent import TableAgent
 from app.db import execute_readonly_query
 from app.config import settings
 from app.vector_store import VectorStore
@@ -19,6 +20,7 @@ class QueryResponse:
     rows: List[Dict[str, Any]]
     figure: Optional[Dict[str, Any]] = None
     intent: Optional[str] = None
+    suggested_tables: Optional[List[str]] = None
 
 class QueryService:
     def __init__(self, kb: Optional[KnowledgeBase] = None):
@@ -34,9 +36,10 @@ class QueryService:
         self.router = RouterAgent()
         self.sql_agent = SQLAgent(self.kb, vector_store=self.vector_store)
         self.viz_agent = VizAgent(self.kb)
+        self.table_agent = TableAgent(self.kb)
         self.cache: Optional[Dict[str, List[Dict[str, Any]]]] = {} if settings.enable_query_cache else None
 
-    def handle_question(self, question: str, execute: bool = True) -> QueryResponse:
+    def handle_question(self, question: str, execute: bool = True, tables_override: Optional[List[str]] = None) -> QueryResponse:
         decision = self.router.route(question)
 
         if decision.agent == "viz_agent":
@@ -45,10 +48,19 @@ class QueryService:
                 logger.info("Intent classifier usage: %s", decision.usage)
             if viz_result.usage:
                 logger.info("Viz generator usage: %s", viz_result.usage)
-            return QueryResponse(sql=viz_result.sql, rows=viz_result.rows, figure=viz_result.figure, intent=decision.intent)
+            suggested_tables = self.table_agent.suggest(question)
+            return QueryResponse(
+                sql=viz_result.sql,
+                rows=viz_result.rows,
+                figure=viz_result.figure,
+                intent=decision.intent,
+                suggested_tables=suggested_tables,
+            )
 
         if decision.agent == "sql_agent":
-            sql_result: SQLResult = self.sql_agent.generate_sql(question)
+            suggested_tables = tables_override or self.table_agent.suggest(question)
+            allowed = suggested_tables or self.kb.allowed_objects()
+            sql_result: SQLResult = self.sql_agent.generate_sql(question, allowed_objects=allowed)
 
             # Log token usage for cost visibility.
             if decision.usage:
@@ -64,7 +76,7 @@ class QueryService:
                     else:
                         rows = execute_readonly_query(
                             sql_result.sql,
-                            allowed_objects=self.kb.allowed_objects(),
+                            allowed_objects=allowed or self.kb.allowed_objects(),
                             allowed_columns=self.kb.allowed_columns(),
                         )
                         if self.cache is not None:
@@ -74,14 +86,14 @@ class QueryService:
                     repaired = self.sql_agent.repair_sql(question, sql_result.sql, str(exc))
                     rows = execute_readonly_query(
                         repaired.sql,
-                        allowed_objects=self.kb.allowed_objects(),
+                        allowed_objects=allowed or self.kb.allowed_objects(),
                         allowed_columns=self.kb.allowed_columns(),
                     )
                     if self.cache is not None:
                         self.cache[repaired.sql] = rows
-                    return QueryResponse(sql=repaired.sql, rows=rows, intent=decision.intent)
+                    return QueryResponse(sql=repaired.sql, rows=rows, intent=decision.intent, suggested_tables=suggested_tables)
 
-            return QueryResponse(sql=sql_result.sql, rows=rows, intent=decision.intent)
+            return QueryResponse(sql=sql_result.sql, rows=rows, intent=decision.intent, suggested_tables=suggested_tables)
 
         raise ValueError(
             "Sorry, no agent is available to handle this question. "

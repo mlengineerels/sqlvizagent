@@ -15,9 +15,26 @@ const ui = (() => {
     pagePrev: document.getElementById("page-prev"),
     pageNext: document.getElementById("page-next"),
     pageInfo: document.getElementById("page-info"),
+    tablesDetails: document.getElementById("tables-details"),
+    tablesInfo: document.getElementById("tables-info"),
+    tablesChips: document.getElementById("tables-chips"),
+    applyTables: document.getElementById("apply-tables"),
   };
 
-  const state = { sql: "", rows: [], figure: null, sortBy: null, sortDir: "asc", page: 1, pageSize: 20 };
+  const state = {
+    sql: "",
+    rows: [],
+    figure: null,
+    sortBy: null,
+    sortDir: "asc",
+    page: 1,
+    pageSize: 20,
+    lastQuestion: "",
+    lastTablesUsed: [],
+    suggestedTables: [],
+    selectedTables: new Set(),
+    sessionId: null,
+  };
   const toast = document.getElementById("toast");
   let toastTimer = null;
 
@@ -179,10 +196,27 @@ const ui = (() => {
     setSQL("—", { store: false });
     clearRows();
     clearFigure();
+    renderTableSuggestions([], { reason: "No table suggestions yet." });
   };
 
   return { elements, state, setStatus, setSQL, renderRows, renderFigure, reset, setLoading, showToast };
 })();
+
+const SESSION_KEY = "nl2sql-session-id";
+const ensureSessionId = () => {
+  try {
+    const existing = localStorage.getItem(SESSION_KEY);
+    if (existing) return existing;
+    const generated = crypto.randomUUID
+      ? crypto.randomUUID()
+      : `sess_${Math.random().toString(16).slice(2)}${Date.now()}`;
+    localStorage.setItem(SESSION_KEY, generated);
+    return generated;
+  } catch (_err) {
+    return `sess_${Date.now()}`;
+  }
+};
+ui.state.sessionId = ensureSessionId();
 
 const sortRows = (rows) => {
   const { sortBy, sortDir } = ui.state;
@@ -232,11 +266,61 @@ const updatePagination = (totalPages) => {
   el.pageNext.disabled = ui.state.page >= totalPages;
 };
 
-async function fetchQuery(question) {
+function renderTableSuggestions(suggested, { reason = "" } = {}) {
+  const infoEl = ui.elements.tablesInfo;
+  const chipsEl = ui.elements.tablesChips;
+  const applyBtn = ui.elements.applyTables;
+
+  const unique = Array.from(new Set(suggested || [])).filter(Boolean);
+  ui.state.suggestedTables = unique;
+  ui.state.selectedTables = new Set(unique);
+
+  chipsEl.innerHTML = "";
+  applyBtn.disabled = !unique.length;
+
+  if (!unique.length) {
+    infoEl.textContent = reason || "No table suggestions yet.";
+    return;
+  }
+
+  if (unique.length > 1 && ui.elements.tablesDetails) {
+    ui.elements.tablesDetails.open = true;
+  }
+
+  infoEl.textContent =
+    unique.length > 1
+      ? reason || "Multiple relevant tables found. Select the ones to use and click apply."
+      : reason || `Using table: ${unique[0]}`;
+
+  unique.forEach((name) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip active";
+    chip.textContent = name;
+    chip.addEventListener("click", () => {
+      if (chip.classList.contains("active")) {
+        chip.classList.remove("active");
+        ui.state.selectedTables.delete(name);
+      } else {
+        chip.classList.add("active");
+        ui.state.selectedTables.add(name);
+      }
+      applyBtn.disabled = ui.state.selectedTables.size === 0;
+    });
+    chipsEl.appendChild(chip);
+  });
+}
+
+async function fetchQuery(question, { tables = [] } = {}) {
   const resp = await fetch("/api/query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, execute: true }),
+    body: JSON.stringify({
+      question,
+      execute: true,
+      tables,
+      session_id: ui.state.sessionId,
+    }),
   });
 
   const data = await resp.json();
@@ -246,21 +330,59 @@ async function fetchQuery(question) {
   return data;
 }
 
-async function handleSend() {
+function applyResponse(data, intent, tablesUsed) {
+  ui.setSQL(data.sql || "—");
+  ui.renderRows(data.rows || [], intent);
+  ui.renderFigure(data.figure, intent);
+  ui.setStatus(`Intent: ${intent || "unknown"}`);
+  renderTableSuggestions(data.suggested_tables || [], {
+    reason:
+      tablesUsed && tablesUsed.length
+        ? `Using your selected tables: ${tablesUsed.join(", ")}`
+        : "",
+  });
+}
+
+async function handleSend(tablesOverride = []) {
   const question = ui.elements.question.value.trim();
   if (!question) return;
 
+  ui.state.lastQuestion = question;
+  ui.state.lastTablesUsed = tablesOverride;
+
   ui.setLoading(true);
   ui.reset();
+  renderTableSuggestions([], { reason: "Finding relevant tables..." });
 
   try {
-    const data = await fetchQuery(question);
+    const data = await fetchQuery(question, { tables: tablesOverride });
     const intent = data.intent || "";
+    applyResponse(data, intent, tablesOverride);
+  } catch (err) {
+    ui.setStatus(err.message || "Something went wrong.");
+  } finally {
+    ui.setLoading(false);
+  }
+}
 
-    ui.setSQL(data.sql || "—");
-    ui.renderRows(data.rows || [], intent);
-    ui.renderFigure(data.figure, intent);
-    ui.setStatus(`Intent: ${intent || "unknown"}`);
+async function handleApplyTables() {
+  if (!ui.state.lastQuestion) {
+    ui.showToast("Ask a question first.", "error");
+    return;
+  }
+  const selected = Array.from(ui.state.selectedTables || []);
+  if (!selected.length) {
+    ui.showToast("Select at least one table.", "error");
+    return;
+  }
+  ui.state.lastTablesUsed = selected;
+  ui.setLoading(true);
+  ui.reset("Re-running with selected tables…");
+  renderTableSuggestions(selected, { reason: `Using your selected tables: ${selected.join(", ")}` });
+  try {
+    const data = await fetchQuery(ui.state.lastQuestion, { tables: selected });
+    const intent = data.intent || "";
+    applyResponse(data, intent, selected);
   } catch (err) {
     ui.setStatus(err.message || "Something went wrong.");
   } finally {
@@ -321,9 +443,10 @@ ui.elements.pageNext.addEventListener("click", () => {
 });
 
 ui.elements.clear.addEventListener("click", handleClear);
-ui.elements.send.addEventListener("click", handleSend);
+ui.elements.send.addEventListener("click", () => handleSend([]));
 ui.elements.question.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !ui.elements.send.disabled) handleSend();
+    if (e.key === "Enter" && !ui.elements.send.disabled) handleSend([]);
 });
+ui.elements.applyTables.addEventListener("click", handleApplyTables);
 
 updatePagination(0);

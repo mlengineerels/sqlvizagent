@@ -44,3 +44,29 @@ FastAPI service that routes natural language questions to SQL or visualizations,
 ## Notes
 - Runtime does **not** read `metadata.json`; it relies on the vector store populated by the sync script.
 - If embeddings are empty or pgvector isn’t available, schema context and safety lists will be empty.
+
+## Architecture (high-level)
+```mermaid
+flowchart TD
+    UI[Web UI / curl] --> API[/FastAPI /api/query/]
+    API --> Intent[Intents (small OpenAI model)]
+    API --> Router{Router}
+    Intent --> Router
+    Router -->|retrieval| SQLAgent[SQL Agent (OpenAI SQL model)]
+    Router -->|visualization| VizAgent[Viz Agent (OpenAI + Plotly)]
+    SQLAgent --> Vector[pgvector: schema_embeddings]
+    VizAgent --> Vector
+    SQLAgent --> DB[(Postgres)]
+    VizAgent --> DB
+    Vector --> DB
+    DB --> API
+    SQLAgent -.repair if DB error.- DB
+    DB --> UI
+    VizAgent --> UI
+```
+
+**Key pieces**
+- **pgvector**: stores schema embeddings (`schema_embeddings`); populated by `scripts/embed_metadata.py`.
+- **Knowledge base**: loads tables/views from pgvector only.
+- **Guards**: enforce SELECT-only, allowed objects/columns, default LIMIT, and a single repair attempt.
+- **Models**: intent (small model), SQL generation (larger model), optional repair (can use smaller model).

@@ -291,3 +291,28 @@ details.collapsible pre {
   display: flex;
   gap: 6px;
 }
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.chip {
+  padding: 6px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.04);
+  color: #e5e7eb;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.2s, background 0.2s;
+}
+.chip.active {
+  border-color: #3b82f6;
+  background: rgba(59,130,246,0.12);
+}
+.table-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
