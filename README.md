@@ -47,7 +47,7 @@ FastAPI service that routes natural language questions to SQL or visualizations,
 - If embeddings are empty or pgvector isn’t available, schema context and safety lists will be empty.
 
 ## Architecture (high-level)
-```mermaid
+```
 flowchart TD
     UI[Web UI / curl] --> API[/FastAPI /api/query/]
     API --> Intent[Intents (small OpenAI model)]
