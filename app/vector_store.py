@@ -143,7 +143,7 @@ class VectorStore:
                 )
             conn.commit()
 
-    def get_relevant_schema(self, question: str, top_k: int = 3 ) -> str:
+    def get_relevant_schema(self, question: str, top_k: int = 2 ) -> str:
         try:
             query_embedding = self._embed(question)
         except Exception as exc:

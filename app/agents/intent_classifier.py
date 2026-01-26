@@ -85,5 +85,7 @@ class IntentClassifier:
             intent = "retrieval"
         else:
             intent = "other"
+        if usage:
+            logger.info("Intent classifier usage (model=%s): %s", self.model, usage)
         logger.info("Intent classified as: %s (raw: %s)", intent, label)
         return IntentPrediction(intent=intent, reason=f"LLM label: {label}", usage=usage)

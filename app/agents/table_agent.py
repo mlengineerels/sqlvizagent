@@ -30,7 +30,7 @@ class TableAgent:
             self.client = None
             self.use_client = False
 
-    def suggest(self, question: str, top_k: int = 3) -> List[str]:
+    def suggest(self, question: str, top_k: int = 2) -> List[str]:
         allowed = self.kb.allowed_objects()
         if not allowed:
             return []
@@ -54,6 +54,8 @@ class TableAgent:
                     max_tokens=64,
                 )
                 text = resp.choices[0].message.content or ""
+                if getattr(resp, "usage", None):
+                    usage = resp.usage.model_dump() if hasattr(resp.usage, "model_dump") else dict(resp.usage)
             else:
                 resp = openai.ChatCompletion.create(
                     model=self.model,
@@ -65,6 +67,7 @@ class TableAgent:
                     max_tokens=64,
                 )
                 text = resp.choices[0].message["content"] or ""
+                usage = resp.get("usage")
         except Exception as exc:
             logger.warning("Table suggestion failed: %s", exc)
             return []
@@ -78,4 +81,6 @@ class TableAgent:
                 filtered.append(name)
             if len(filtered) >= top_k:
                 break
+        if usage:
+            logger.info("Table suggestion usage (model=%s): %s", self.model, usage)
         return filtered

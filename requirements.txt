@@ -12,3 +12,4 @@ python-dotenv
 pydantic-settings
 # openai
 plotly
+sqlglot

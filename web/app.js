@@ -12,6 +12,7 @@ const ui = (() => {
     copySql: document.getElementById("copy-sql"),
     copyRows: document.getElementById("copy-rows"),
     clear: document.getElementById("clear"),
+    planOnly: document.getElementById("plan-only"),
     pagePrev: document.getElementById("page-prev"),
     pageNext: document.getElementById("page-next"),
     pageInfo: document.getElementById("page-info"),
@@ -19,6 +20,8 @@ const ui = (() => {
     tablesInfo: document.getElementById("tables-info"),
     tablesChips: document.getElementById("tables-chips"),
     applyTables: document.getElementById("apply-tables"),
+    traceDetails: document.getElementById("trace-details"),
+    trace: document.getElementById("trace"),
   };
 
   const state = {
@@ -34,6 +37,9 @@ const ui = (() => {
     suggestedTables: [],
     selectedTables: new Set(),
     sessionId: null,
+    trace: [],
+    plan: [],
+    durationMs: null,
   };
   const toast = document.getElementById("toast");
   let toastTimer = null;
@@ -178,6 +184,48 @@ const ui = (() => {
     state.figure = figure;
   };
 
+  const renderTrace = (trace) => {
+    const list = trace || [];
+    state.trace = list;
+    if (!elements.trace) return;
+    if (!list.length) {
+      elements.trace.textContent = "—";
+      if (elements.traceDetails) elements.traceDetails.open = false;
+      return;
+    }
+    const planned = (state.plan || [])
+      .map((p) => p.tool || p.description || "")
+      .filter(Boolean)
+      .join(" → ");
+    const ul = document.createElement("ul");
+    ul.className = "trace-list";
+    list.forEach((t) => {
+      const li = document.createElement("li");
+      li.className = `trace-item status-${t.status || "unknown"}`;
+      const status = t.status || "";
+      const label = `${t.step || ""} · ${t.tool || ""} · ${status}`;
+      const detail = t.detail || "";
+      const strong = document.createElement("strong");
+      strong.textContent = label;
+      li.appendChild(strong);
+      if (detail) {
+        const span = document.createElement("span");
+        span.textContent = ` — ${detail}`;
+        li.appendChild(span);
+      }
+      ul.appendChild(li);
+    });
+    elements.trace.innerHTML = "";
+    if (planned) {
+      const planDiv = document.createElement("div");
+      planDiv.className = "trace-plan muted";
+      planDiv.textContent = `Plan: ${planned}`;
+      elements.trace.appendChild(planDiv);
+    }
+    elements.trace.appendChild(ul);
+    if (elements.traceDetails) elements.traceDetails.open = true;
+  };
+
   const setLoading = (isLoading) => {
     elements.send.classList.toggle("loading", isLoading);
     elements.send.disabled = isLoading;
@@ -192,14 +240,18 @@ const ui = (() => {
     state.sortBy = null;
     state.sortDir = "asc";
     state.page = 1;
+    state.trace = [];
+    state.plan = [];
+    state.durationMs = null;
     setStatus(statusText);
     setSQL("—", { store: false });
     clearRows();
     clearFigure();
+    renderTrace([]);
     renderTableSuggestions([], { reason: "No table suggestions yet." });
   };
 
-  return { elements, state, setStatus, setSQL, renderRows, renderFigure, reset, setLoading, showToast };
+  return { elements, state, setStatus, setSQL, renderRows, renderFigure, renderTrace, reset, setLoading, showToast };
 })();
 
 const SESSION_KEY = "nl2sql-session-id";
@@ -311,13 +363,14 @@ function renderTableSuggestions(suggested, { reason = "" } = {}) {
   });
 }
 
-async function fetchQuery(question, { tables = [] } = {}) {
+async function fetchQuery(question, { tables = [], planOnly = false } = {}) {
   const resp = await fetch("/api/query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       question,
-      execute: true,
+      execute: !planOnly,
+      plan_only: planOnly,
       tables,
       session_id: ui.state.sessionId,
     }),
@@ -330,11 +383,30 @@ async function fetchQuery(question, { tables = [] } = {}) {
   return data;
 }
 
-function applyResponse(data, intent, tablesUsed) {
+function applyResponse(data, intent, tablesUsed, planOnly) {
   ui.setSQL(data.sql || "—");
   ui.renderRows(data.rows || [], intent);
   ui.renderFigure(data.figure, intent);
-  ui.setStatus(`Intent: ${intent || "unknown"}`);
+
+  ui.state.plan = data.plan || [];
+  ui.renderTrace(data.trace || []);
+  if (planOnly) {
+    ui.state.rows = [];
+    if (ui.elements.rows) {
+      ui.elements.rows.textContent = "Plan only mode: execution skipped.";
+    }
+    if (ui.elements.chart) {
+      ui.elements.chart.innerHTML = "Plan only mode: no figure.";
+    }
+  }
+
+  ui.state.plan = data.plan || [];
+  ui.state.durationMs = data.duration_ms || null;
+  const duration = ui.state.durationMs ? ` • ${ui.state.durationMs} ms` : "";
+  const mode = planOnly ? " • plan only" : "";
+  const notes = (data.notes || []).join("; ");
+  const notesText = notes ? ` • ${notes}` : "";
+  ui.setStatus(`Intent: ${intent || "unknown"}${mode}${duration}${notesText}`);
   renderTableSuggestions(data.suggested_tables || [], {
     reason:
       tablesUsed && tablesUsed.length
@@ -347,6 +419,7 @@ async function handleSend(tablesOverride = []) {
   const question = ui.elements.question.value.trim();
   if (!question) return;
 
+  const planOnly = !!(ui.elements.planOnly && ui.elements.planOnly.checked);
   ui.state.lastQuestion = question;
   ui.state.lastTablesUsed = tablesOverride;
 
@@ -355,9 +428,9 @@ async function handleSend(tablesOverride = []) {
   renderTableSuggestions([], { reason: "Finding relevant tables..." });
 
   try {
-    const data = await fetchQuery(question, { tables: tablesOverride });
+    const data = await fetchQuery(question, { tables: tablesOverride, planOnly });
     const intent = data.intent || "";
-    applyResponse(data, intent, tablesOverride);
+    applyResponse(data, intent, tablesOverride, planOnly);
   } catch (err) {
     ui.setStatus(err.message || "Something went wrong.");
   } finally {
@@ -375,14 +448,15 @@ async function handleApplyTables() {
     ui.showToast("Select at least one table.", "error");
     return;
   }
+  const planOnly = !!(ui.elements.planOnly && ui.elements.planOnly.checked);
   ui.state.lastTablesUsed = selected;
   ui.setLoading(true);
   ui.reset("Re-running with selected tables…");
   renderTableSuggestions(selected, { reason: `Using your selected tables: ${selected.join(", ")}` });
   try {
-    const data = await fetchQuery(ui.state.lastQuestion, { tables: selected });
+    const data = await fetchQuery(ui.state.lastQuestion, { tables: selected, planOnly });
     const intent = data.intent || "";
-    applyResponse(data, intent, selected);
+    applyResponse(data, intent, selected, planOnly);
   } catch (err) {
     ui.setStatus(err.message || "Something went wrong.");
   } finally {

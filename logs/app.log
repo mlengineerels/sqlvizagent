@@ -1,0 +1,213 @@
+2026-01-26 11:13:14 | INFO | app.agents.intent_classifier | Classifying intent for question: give me the distinct movies with rating as 5 and the generee is horror and also get me the link to imdb
+2026-01-26 11:13:15 | INFO | app.agents.intent_classifier | Intent classifier usage (model=gpt-3.5-turbo): {
+  "prompt_tokens": 101,
+  "completion_tokens": 3,
+  "total_tokens": 104,
+  "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+  }
+}
+2026-01-26 11:13:15 | INFO | app.agents.intent_classifier | Intent classified as: retrieval (raw: retrieval)
+2026-01-26 11:13:15 | INFO | app.agents.table_agent | Table suggestion usage (model=gpt-3.5-turbo): {
+  "prompt_tokens": 106,
+  "completion_tokens": 5,
+  "total_tokens": 111,
+  "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+  }
+}
+2026-01-26 11:13:15 | INFO | app.services.query_service | Intent classifier usage: {
+  "prompt_tokens": 101,
+  "completion_tokens": 3,
+  "total_tokens": 104,
+  "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+  }
+}
+2026-01-26 11:13:15 | INFO | app.agents.planner | Planning steps for intent=retrieval question=give me the distinct movies with rating as 5 and the generee is horror and also get me the link to imdb
+2026-01-26 11:13:27 | INFO | app.agents.sql_agent | Generating SQL for question: give me the distinct movies with rating as 5 and the generee is horror and also get me the link to imdb
+2026-01-26 11:13:30 | INFO | app.agents.sql_agent | Generated SQL (normal): SELECT DISTINCT m.title, l.imdbid
+FROM private.movies m
+JOIN private.ratings r ON m.movieid = r.movieid
+JOIN private.links l ON m.movieid = l.movieid
+WHERE r.rating = 5 AND m.genres LIKE '%Horror%'
+2026-01-26 11:13:30 | INFO | app.agents.sql_agent | SQL generator usage (model=gpt-4): {
+  "prompt_tokens": 404,
+  "completion_tokens": 57,
+  "total_tokens": 461,
+  "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+  }
+}
+2026-01-26 11:13:30 | INFO | app.agents.sql_validator | Validated SQL -> SELECT DISTINCT m.title, l.imdbid FROM private.movies AS m JOIN private.ratings AS r ON m.movieid = r.movieid JOIN private.links AS l ON m.movieid = l.movieid WHERE r.rating = 5 AND m.genres LIKE '%Horror%' LIMIT 200
+2026-01-26 11:13:30 | INFO | app.db | Executing SQL: SELECT DISTINCT m.title, l.imdbid FROM private.movies AS m JOIN private.ratings AS r ON m.movieid = r.movieid JOIN private.links AS l ON m.movieid = l.movieid WHERE r.rating = 5 AND m.genres LIKE '%Horror%' LIMIT 200
+2026-01-26 11:15:14 | INFO | app.agents.intent_classifier | Classifying intent for question: give me the distinct movies with rating as 5 and the generee is horror and also get me the link to imdb
+2026-01-26 11:15:15 | INFO | app.agents.intent_classifier | Intent classifier usage (model=gpt-3.5-turbo): {
+  "prompt_tokens": 101,
+  "completion_tokens": 3,
+  "total_tokens": 104,
+  "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+  }
+}
+2026-01-26 11:15:15 | INFO | app.agents.intent_classifier | Intent classified as: retrieval (raw: retrieval)
+2026-01-26 11:15:16 | INFO | app.agents.table_agent | Table suggestion usage (model=gpt-3.5-turbo): {
+  "prompt_tokens": 106,
+  "completion_tokens": 5,
+  "total_tokens": 111,
+  "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+  }
+}
+2026-01-26 11:15:16 | INFO | app.services.query_service | Intent classifier usage: {
+  "prompt_tokens": 101,
+  "completion_tokens": 3,
+  "total_tokens": 104,
+  "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+  }
+}
+2026-01-26 11:15:16 | INFO | app.agents.planner | Planning steps for intent=retrieval question=give me the distinct movies with rating as 5 and the generee is horror and also get me the link to imdb
+2026-01-26 11:15:26 | INFO | app.agents.sql_agent | Generating SQL for question: give me the distinct movies with rating as 5 and the generee is horror and also get me the link to imdb
+2026-01-26 11:15:29 | INFO | app.agents.sql_agent | Generated SQL (normal): SELECT DISTINCT m.title, l.imdbid
+FROM private.movies m
+JOIN private.ratings r ON m.movieid = r.movieid
+JOIN private.links l ON m.movieid = l.movieid
+WHERE r.rating = 5 AND m.genres LIKE '%Horror%'
+2026-01-26 11:15:29 | INFO | app.agents.sql_agent | SQL generator usage (model=gpt-4): {
+  "prompt_tokens": 404,
+  "completion_tokens": 57,
+  "total_tokens": 461,
+  "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+  }
+}
+2026-01-26 11:15:29 | INFO | app.agents.sql_validator | Validated SQL -> SELECT DISTINCT m.title, l.imdbid FROM private.movies AS m JOIN private.ratings AS r ON m.movieid = r.movieid JOIN private.links AS l ON m.movieid = l.movieid WHERE r.rating = 5 AND m.genres LIKE '%Horror%' LIMIT 200
+2026-01-26 11:15:29 | INFO | app.db | Executing SQL: SELECT DISTINCT m.title, l.imdbid FROM private.movies AS m JOIN private.ratings AS r ON m.movieid = r.movieid JOIN private.links AS l ON m.movieid = l.movieid WHERE r.rating = 5 AND m.genres LIKE '%Horror%' LIMIT 200
+2026-01-26 11:47:09 | INFO | app.agents.intent_classifier | Classifying intent for question: give me the distinct movies with rating as 5 and the generee is horror and also get me the link to imdb
+2026-01-26 11:47:11 | INFO | app.agents.intent_classifier | Intent classifier usage (model=gpt-3.5-turbo): {
+  "prompt_tokens": 101,
+  "completion_tokens": 3,
+  "total_tokens": 104,
+  "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+  }
+}
+2026-01-26 11:47:11 | INFO | app.agents.intent_classifier | Intent classified as: retrieval (raw: retrieval)
+2026-01-26 11:47:11 | INFO | app.agents.table_agent | Table suggestion usage (model=gpt-3.5-turbo): {
+  "prompt_tokens": 106,
+  "completion_tokens": 5,
+  "total_tokens": 111,
+  "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+  }
+}
+2026-01-26 11:47:11 | INFO | app.services.query_service | Intent classifier usage: {
+  "prompt_tokens": 101,
+  "completion_tokens": 3,
+  "total_tokens": 104,
+  "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+  }
+}
+2026-01-26 11:47:11 | INFO | app.agents.planner | Planning steps for intent=retrieval question=give me the distinct movies with rating as 5 and the generee is horror and also get me the link to imdb
+2026-01-26 11:47:21 | INFO | app.agents.sql_agent | Generating SQL for question: give me the distinct movies with rating as 5 and the generee is horror and also get me the link to imdb
+2026-01-26 11:47:24 | INFO | app.agents.sql_agent | Generated SQL (normal): SELECT DISTINCT m.movieid, m.title, l.imdbid
+FROM private.movies m
+JOIN private.ratings r ON m.movieid = r.movieid
+JOIN private.links l ON m.movieid = l.movieid
+WHERE r.rating = 5 AND m.genres LIKE '%Horror%'
+2026-01-26 11:47:24 | INFO | app.agents.sql_agent | SQL generator usage (model=gpt-4): {
+  "prompt_tokens": 243,
+  "completion_tokens": 61,
+  "total_tokens": 304,
+  "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+    "reasoning_tokens": 0,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+  }
+}
+2026-01-26 11:47:24 | INFO | app.agents.sql_validator | Validated SQL -> SELECT DISTINCT m.movieid, m.title, l.imdbid FROM private.movies AS m JOIN private.ratings AS r ON m.movieid = r.movieid JOIN private.links AS l ON m.movieid = l.movieid WHERE r.rating = 5 AND m.genres LIKE '%Horror%' LIMIT 200
+2026-01-26 11:47:24 | INFO | app.db | Executing SQL: SELECT DISTINCT m.movieid, m.title, l.imdbid FROM private.movies AS m JOIN private.ratings AS r ON m.movieid = r.movieid JOIN private.links AS l ON m.movieid = l.movieid WHERE r.rating = 5 AND m.genres LIKE '%Horror%' LIMIT 200

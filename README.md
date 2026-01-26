@@ -16,6 +16,7 @@ FastAPI service that routes natural language questions to SQL or visualizations,
 
 ## How it works
 - **Vector-first schema**: The service retrieves schema context from the `schema_embeddings` table (pgvector) rather than shipping metadata in prompts.
+- **Planner + controller**: A planner produces a structured step list, and a controller executes tools (schema retrieval, SQL draft, sqlglot validation, execution, optional repair, viz render) with full trace.
 - **Intent + routing**: Lightweight model for intent classification; SQL agent uses a larger model for query generation; viz agent for chart specs + Plotly rendering.
 - **Safety**: Only SELECT is allowed; allowed objects/columns come from vector entries; default LIMIT applied; repair loop on DB errors.
 - **Caching (optional)**: Enable row-level cache with `ENABLE_QUERY_CACHE` in `.env`.
@@ -33,7 +34,7 @@ FastAPI service that routes natural language questions to SQL or visualizations,
 - `POST /api/query` – `{ "question": "...", "execute": true|false }`; returns SQL, rows, optional figure, intent.
 
 ## UI
-- Chat-style interface at `/`: shows SQL, tabular rows (first 20), and inline Plotly chart for viz intents.
+- Chat-style interface at `/`: shows SQL, tabular rows (first 20), and inline Plotly chart for viz intents plus a plan-only toggle and a trace pane to inspect planner/controller steps.
 
 ## Env/config
 - OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL` (SQL), `OPENAI_INTENT_MODEL` (intent), `OPENAI_EMBEDDING_MODEL`.

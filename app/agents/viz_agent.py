@@ -118,7 +118,13 @@ Respond with ONLY the JSON object.
         if "sql" not in plan_obj or "chart" not in plan_obj:
             raise ValueError("Visualization plan must include 'sql' and 'chart' keys.")
 
+        if usage:
+            logger.info("Viz planner usage (model=%s): %s", self.model, usage)
         return VizPlan(sql=plan_obj["sql"], chart=plan_obj["chart"], usage=usage)
+
+    def plan_viz(self, question: str) -> VizPlan:
+        """Public wrapper to plan a visualization without executing it."""
+        return self._plan(question)
 
     def _build_figure(self, rows: List[Dict[str, Any]], chart: Dict[str, Any]) -> Dict[str, Any]:
         chart_type = (chart.get("type") or "bar").lower()
@@ -174,7 +180,7 @@ Respond with ONLY the JSON object.
         return fig.to_dict()
 
     def generate_viz(self, question: str, execute: bool = True, cache: Optional[MutableMapping[str, List[Dict[str, Any]]]] = None) -> VisualizationResult:
-        plan = self._plan(question)
+        plan = self.plan_viz(question)
 
         if not execute:
             return VisualizationResult(sql=plan.sql, rows=[], figure=None, usage=plan.usage)

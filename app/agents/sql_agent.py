@@ -41,11 +41,11 @@ class SQLAgent:
         allowed_objects_str = ", ".join(allowed_objects) or "the provided tables/views"
 
         return f"""
-You are an expert {dialect} SQL query generator for the MovieLens dataset.
+You are an expert {dialect} SQL query generator for a dataset.
 
 You MUST follow these rules:
 
-1. Only query from the allowed tables/views: {allowed_objects}
+1. Only query from the allowed tables/views: {allowed_objects_str}
 2. Only generate read-only SELECT queries.
 3. Use {dialect} syntax.
 4. Use explicit WHERE, GROUP BY, ORDER BY, LIMIT clauses as needed.
@@ -57,10 +57,15 @@ Schema context (from pgvector retrieval only):
 {relevant_schema or "None retrieved; use best judgment with allowed objects only."}
 """.strip()
 
-    def generate_sql(self, question: str, allowed_objects: Optional[List[str]] = None) -> SQLResult:
-        relevant = ""
-        if self.vector_store:
-            relevant = self.vector_store.get_relevant_schema(question, top_k=3)
+    def generate_sql(
+        self,
+        question: str,
+        allowed_objects: Optional[List[str]] = None,
+        schema_override: Optional[str] = None,
+    ) -> SQLResult:
+        relevant = schema_override or ""
+        if not relevant and self.vector_store:
+            relevant = self.vector_store.get_relevant_schema(question, top_k=2)
         allowed = allowed_objects or self.kb.allowed_objects()
         system_prompt = self._system_prompt(allowed_objects=allowed, relevant_schema=relevant)
 
@@ -99,6 +104,8 @@ Schema context (from pgvector retrieval only):
             raw_sql = raw_sql.replace("sql\n", "").replace("SQL\n", "").strip()
 
         logger.info("Generated SQL (normal): %s", raw_sql)
+        if usage:
+            logger.info("SQL generator usage (model=%s): %s", self.model, usage)
 
         return SQLResult(sql=raw_sql, debug_prompt=system_prompt, usage=usage)
 
@@ -154,4 +161,6 @@ Schema:
             raw_sql = raw_sql.replace("sql\n", "").replace("SQL\n", "").strip()
 
         logger.info("Repaired SQL: %s", raw_sql)
+        if usage:
+            logger.info("SQL repair usage (model=%s): %s", self.model, usage)
         return SQLResult(sql=raw_sql, debug_prompt=system_prompt, usage=usage)

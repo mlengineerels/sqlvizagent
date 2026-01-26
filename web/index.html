@@ -18,6 +18,10 @@
         <span class="label">➤</span>
       </button>
       <button id="clear" class="ghost" title="Clear">Clear</button>
+      <label class="toggle" title="Plan only (skip execution)">
+        <input type="checkbox" id="plan-only" />
+        <span>Plan only</span>
+      </label>
     </div>
     <div class="status" id="status"></div>
     <div class="panel">
@@ -53,6 +57,10 @@
       <details id="figure-details" class="collapsible">
         <summary>Figure (click to expand)</summary>
         <div id="chart">No figure yet.</div>
+      </details>
+      <details id="trace-details" class="collapsible">
+        <summary>Trace (click to expand)</summary>
+        <div id="trace" class="pane">—</div>
       </details>
     </div>
   </div>
