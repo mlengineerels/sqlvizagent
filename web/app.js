@@ -3,6 +3,12 @@ const ui = (() => {
     question: document.getElementById("question"),
     send: document.getElementById("send"),
     status: document.getElementById("status"),
+    chatList: document.getElementById("chat-list"),
+    newChat: document.getElementById("new-chat"),
+    chatSearch: document.getElementById("chat-search"),
+    chatHistory: document.getElementById("chat-history"),
+    historyDetails: document.getElementById("history-details"),
+    historyCount: document.getElementById("history-count"),
     sqlDetails: document.getElementById("sql-details"),
     sql: document.getElementById("sql"),
     rowsDetails: document.getElementById("rows-details"),
@@ -40,6 +46,9 @@ const ui = (() => {
     trace: [],
     plan: [],
     durationMs: null,
+    chats: [],
+    activeChatId: null,
+    messages: [],
   };
   const toast = document.getElementById("toast");
   let toastTimer = null;
@@ -231,9 +240,11 @@ const ui = (() => {
     elements.send.disabled = isLoading;
     elements.clear.disabled = isLoading;
     elements.question.disabled = isLoading;
+    if (elements.newChat) elements.newChat.disabled = isLoading;
+    if (elements.chatSearch) elements.chatSearch.disabled = isLoading;
   };
 
-  const reset = (statusText = "Thinking…") => {
+  const reset = (statusText = "Thinking…", { clearHistory = false } = {}) => {
     state.sql = "";
     state.rows = [];
     state.figure = null;
@@ -249,12 +260,27 @@ const ui = (() => {
     clearFigure();
     renderTrace([]);
     renderTableSuggestions([], { reason: "No table suggestions yet." });
+    if (clearHistory) {
+      renderChatHistory([]);
+    }
   };
 
-  return { elements, state, setStatus, setSQL, renderRows, renderFigure, renderTrace, reset, setLoading, showToast };
+  return {
+    elements,
+    state,
+    setStatus,
+    setSQL,
+    renderRows,
+    renderFigure,
+    renderTrace,
+    reset,
+    setLoading,
+    showToast,
+  };
 })();
 
 const SESSION_KEY = "nl2sql-session-id";
+const HISTORY_OPEN_KEY = "nl2sql-history-open";
 const ensureSessionId = () => {
   try {
     const existing = localStorage.getItem(SESSION_KEY);
@@ -269,6 +295,39 @@ const ensureSessionId = () => {
   }
 };
 ui.state.sessionId = ensureSessionId();
+
+function apiRequest(path, options = {}) {
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  return fetch(path, { ...options, headers }).then(async (resp) => {
+    let data = null;
+    try {
+      data = await resp.json();
+    } catch (_err) {
+      data = null;
+    }
+    if (!resp.ok) {
+      const message = (data && data.detail) || "Request failed";
+      throw new Error(message);
+    }
+    return data;
+  });
+}
+
+function formatChatTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function buildChatTitle(text) {
+  const words = String(text || "").trim().split(/\s+/).slice(0, 6);
+  return words.join(" ") || "New chat";
+}
+
+function closeChatMenus() {
+  document.querySelectorAll(".chat-menu.open").forEach((menu) => menu.classList.remove("open"));
+}
 
 const sortRows = (rows) => {
   const { sortBy, sortDir } = ui.state;
@@ -363,24 +422,247 @@ function renderTableSuggestions(suggested, { reason = "" } = {}) {
   });
 }
 
-async function fetchQuery(question, { tables = [], planOnly = false } = {}) {
-  const resp = await fetch("/api/query", {
+function renderChatHistory(messages) {
+  const container = ui.elements.chatHistory;
+  if (!container) return;
+  const list = messages || [];
+  ui.state.messages = list;
+  container.innerHTML = "";
+  if (ui.elements.historyCount) {
+    const count = list.length;
+    ui.elements.historyCount.textContent = count ? `• ${count} message${count > 1 ? "s" : ""}` : "";
+  }
+
+  if (!list.length) {
+    container.innerHTML = '<div class="muted">No messages yet.</div>';
+    return;
+  }
+
+  list.forEach((msg) => {
+    const bubble = document.createElement("div");
+    const role = msg.role === "user" ? "user" : "assistant";
+    bubble.className = `message message-${role}`;
+
+    const header = document.createElement("div");
+    header.className = "message-header";
+    const who = document.createElement("span");
+    who.textContent = role === "user" ? "You" : "Assistant";
+    const when = document.createElement("span");
+    when.textContent = formatChatTime(msg.created_at);
+    header.appendChild(who);
+    header.appendChild(when);
+
+    const body = document.createElement("div");
+    body.className = "message-content";
+    body.textContent = msg.content || "";
+
+    bubble.appendChild(header);
+    bubble.appendChild(body);
+
+    if (role === "assistant" && msg.metadata) {
+      const meta = document.createElement("div");
+      meta.className = "message-meta";
+      const rowCount = Array.isArray(msg.metadata.rows) ? msg.metadata.rows.length : 0;
+      const intent = msg.metadata.intent || "unknown";
+      meta.textContent = `Intent: ${intent} • Rows: ${rowCount}`;
+      bubble.appendChild(meta);
+
+      const actions = document.createElement("div");
+      actions.className = "message-actions";
+      const loadBtn = document.createElement("button");
+      loadBtn.className = "ghost small";
+      loadBtn.textContent = "Load result";
+      loadBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        loadStoredResult(msg.metadata);
+        ui.setStatus("Loaded result from history.");
+      });
+      actions.appendChild(loadBtn);
+      bubble.appendChild(actions);
+    }
+
+    container.appendChild(bubble);
+  });
+  requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+  });
+}
+
+function renderChatList(chats) {
+  const listEl = ui.elements.chatList;
+  if (!listEl) return;
+  const query = (ui.elements.chatSearch && ui.elements.chatSearch.value || "").toLowerCase();
+  const items = (chats || []).filter((chat) =>
+    !query || String(chat.title || "").toLowerCase().includes(query)
+  );
+
+  listEl.innerHTML = "";
+  if (!items.length) {
+    listEl.innerHTML = '<div class="muted small">No chats found.</div>';
+    return;
+  }
+
+  items.forEach((chat) => {
+    const item = document.createElement("div");
+    item.className = `chat-item${chat.id === ui.state.activeChatId ? " active" : ""}`;
+
+    const meta = document.createElement("div");
+    meta.className = "chat-meta";
+    const title = document.createElement("div");
+    title.className = "chat-title";
+    title.textContent = chat.title || "Untitled";
+    const time = document.createElement("div");
+    time.className = "chat-time";
+    time.textContent = formatChatTime(chat.updated_at);
+    meta.appendChild(title);
+    meta.appendChild(time);
+
+    const actions = document.createElement("div");
+    actions.className = "chat-actions";
+    const menuButton = document.createElement("button");
+    menuButton.className = "chat-menu-button";
+    menuButton.textContent = "⋯";
+
+    const menu = document.createElement("div");
+    menu.className = "chat-menu";
+    const renameBtn = document.createElement("button");
+    renameBtn.textContent = "Rename";
+    renameBtn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      closeChatMenus();
+      const nextTitle = window.prompt("Rename chat", chat.title || "");
+      if (!nextTitle) return;
+      try {
+        await apiRequest(`/api/chats/${chat.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ title: nextTitle }),
+        });
+        await loadChats({ selectIfMissing: false });
+      } catch (err) {
+        ui.showToast(err.message || "Rename failed", "error");
+      }
+    });
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "Delete";
+    deleteBtn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      closeChatMenus();
+      const confirmed = window.confirm("Delete this chat?");
+      if (!confirmed) return;
+      try {
+        await apiRequest(`/api/chats/${chat.id}`, { method: "DELETE" });
+        if (chat.id === ui.state.activeChatId) {
+          ui.state.activeChatId = null;
+          ui.state.messages = [];
+          renderChatHistory([]);
+          ui.reset("Chat deleted.", { clearHistory: false });
+        }
+        await loadChats({ selectIfMissing: true });
+      } catch (err) {
+        ui.showToast(err.message || "Delete failed", "error");
+      }
+    });
+    menu.appendChild(renameBtn);
+    menu.appendChild(deleteBtn);
+
+    menuButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeChatMenus();
+      menu.classList.toggle("open");
+    });
+
+    actions.appendChild(menuButton);
+    actions.appendChild(menu);
+
+    item.appendChild(meta);
+    item.appendChild(actions);
+    item.addEventListener("click", () => {
+      selectChat(chat.id);
+    });
+
+    listEl.appendChild(item);
+  });
+}
+
+async function loadChats({ selectIfMissing = true } = {}) {
+  try {
+    const chats = await apiRequest("/api/chats");
+    ui.state.chats = chats || [];
+    renderChatList(ui.state.chats);
+    const activeExists = ui.state.activeChatId &&
+      ui.state.chats.some((chat) => chat.id === ui.state.activeChatId);
+    if (!activeExists) {
+      ui.state.activeChatId = null;
+    }
+    if (selectIfMissing && !ui.state.activeChatId && ui.state.chats.length) {
+      await selectChat(ui.state.chats[0].id);
+    }
+    if (!ui.state.chats.length) {
+      renderChatHistory([]);
+      ui.setStatus("No chats yet. Ask a question to start one.");
+    }
+  } catch (err) {
+    ui.showToast(err.message || "Failed to load chats", "error");
+  }
+}
+
+async function selectChat(chatId) {
+  try {
+    const data = await apiRequest(`/api/chats/${chatId}`);
+    ui.state.activeChatId = chatId;
+    ui.state.messages = data.messages || [];
+    renderChatList(ui.state.chats);
+    renderChatHistory(ui.state.messages);
+    const last = [...ui.state.messages].reverse().find((m) => m.role === "assistant" && m.metadata);
+    if (last && last.metadata) {
+      loadStoredResult(last.metadata);
+    } else {
+      ui.reset("Chat loaded.", { clearHistory: false });
+    }
+  } catch (err) {
+    ui.showToast(err.message || "Failed to load chat", "error");
+  }
+}
+
+async function ensureActiveChat(question) {
+  if (ui.state.activeChatId) return ui.state.activeChatId;
+  const title = buildChatTitle(question);
+  const chat = await apiRequest("/api/chats", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  ui.state.activeChatId = chat.id;
+  ui.state.chats = [chat, ...(ui.state.chats || [])];
+  renderChatList(ui.state.chats);
+  renderChatHistory([]);
+  return chat.id;
+}
+
+function updateActiveChatTitle(question) {
+  if (!ui.state.activeChatId) return;
+  const nextTitle = buildChatTitle(question);
+  if (!nextTitle) return;
+  const updated = (ui.state.chats || []).map((chat) => {
+    if (chat.id !== ui.state.activeChatId) return chat;
+    if (String(chat.title || "").trim().toLowerCase() !== "new chat") return chat;
+    return { ...chat, title: nextTitle };
+  });
+  ui.state.chats = updated;
+  renderChatList(ui.state.chats);
+}
+
+async function fetchQuery(question, { tables = [], planOnly = false, chatId = null } = {}) {
+  return apiRequest("/api/query", {
+    method: "POST",
     body: JSON.stringify({
       question,
       execute: !planOnly,
       plan_only: planOnly,
       tables,
       session_id: ui.state.sessionId,
+      chat_id: chatId,
     }),
   });
-
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || "Request failed");
-  }
-  return data;
 }
 
 function applyResponse(data, intent, tablesUsed, planOnly) {
@@ -415,27 +697,88 @@ function applyResponse(data, intent, tablesUsed, planOnly) {
   });
 }
 
-async function handleSend(tablesOverride = []) {
-  const question = ui.elements.question.value.trim();
-  if (!question) return;
+function buildAssistantMetadata(data, intent, planOnly) {
+  return {
+    sql: data.sql || "",
+    rows: data.rows || [],
+    figure: data.figure || null,
+    intent: intent || "",
+    suggested_tables: data.suggested_tables || [],
+    trace: data.trace || [],
+    plan: data.plan || [],
+    duration_ms: data.duration_ms || null,
+    notes: data.notes || [],
+    plan_only: !!planOnly,
+  };
+}
 
-  const planOnly = !!(ui.elements.planOnly && ui.elements.planOnly.checked);
+function loadStoredResult(metadata) {
+  const intent = metadata.intent || "retrieval";
+  ui.setSQL(metadata.sql || "—");
+  ui.renderRows(metadata.rows || [], intent);
+  ui.renderFigure(metadata.figure, intent);
+  ui.state.plan = metadata.plan || [];
+  ui.renderTrace(metadata.trace || []);
+  ui.state.durationMs = metadata.duration_ms || null;
+  const duration = ui.state.durationMs ? ` • ${ui.state.durationMs} ms` : "";
+  const notes = (metadata.notes || []).join("; ");
+  const notesText = notes ? ` • ${notes}` : "";
+  ui.setStatus(`Intent: ${intent}${duration}${notesText}`);
+  renderTableSuggestions(metadata.suggested_tables || [], { reason: "Loaded from history." });
+}
+
+function addLocalMessage(message) {
+  ui.state.messages = [...(ui.state.messages || []), message];
+  renderChatHistory(ui.state.messages);
+}
+
+async function runQuery(question, tablesOverride = [], planOnly = false) {
+  const chatId = await ensureActiveChat(question);
+  updateActiveChatTitle(question);
   ui.state.lastQuestion = question;
   ui.state.lastTablesUsed = tablesOverride;
+
+  addLocalMessage({
+    role: "user",
+    content: question,
+    created_at: new Date().toISOString(),
+    metadata: {
+      execute: !planOnly,
+      plan_only: planOnly,
+      tables_override: tablesOverride,
+    },
+  });
 
   ui.setLoading(true);
   ui.reset();
   renderTableSuggestions([], { reason: "Finding relevant tables..." });
 
   try {
-    const data = await fetchQuery(question, { tables: tablesOverride, planOnly });
+    const data = await fetchQuery(question, { tables: tablesOverride, planOnly, chatId });
     const intent = data.intent || "";
     applyResponse(data, intent, tablesOverride, planOnly);
+
+    addLocalMessage({
+      role: "assistant",
+      content: data.sql || "Result",
+      created_at: new Date().toISOString(),
+      metadata: buildAssistantMetadata(data, intent, planOnly),
+    });
+
+    await loadChats({ selectIfMissing: false });
   } catch (err) {
     ui.setStatus(err.message || "Something went wrong.");
   } finally {
     ui.setLoading(false);
   }
+}
+
+async function handleSend(tablesOverride = []) {
+  const question = ui.elements.question.value.trim();
+  if (!question) return;
+  const planOnly = !!(ui.elements.planOnly && ui.elements.planOnly.checked);
+  ui.elements.question.value = "";
+  await runQuery(question, tablesOverride, planOnly);
 }
 
 async function handleApplyTables() {
@@ -449,18 +792,26 @@ async function handleApplyTables() {
     return;
   }
   const planOnly = !!(ui.elements.planOnly && ui.elements.planOnly.checked);
-  ui.state.lastTablesUsed = selected;
-  ui.setLoading(true);
   ui.reset("Re-running with selected tables…");
   renderTableSuggestions(selected, { reason: `Using your selected tables: ${selected.join(", ")}` });
+  await runQuery(ui.state.lastQuestion, selected, planOnly);
+}
+
+async function handleNewChat() {
   try {
-    const data = await fetchQuery(ui.state.lastQuestion, { tables: selected, planOnly });
-    const intent = data.intent || "";
-    applyResponse(data, intent, selected, planOnly);
+    const chat = await apiRequest("/api/chats", {
+      method: "POST",
+      body: JSON.stringify({ title: "New chat" }),
+    });
+    ui.state.activeChatId = chat.id;
+    ui.state.messages = [];
+    ui.state.lastQuestion = "";
+    ui.state.lastTablesUsed = [];
+    renderChatHistory([]);
+    ui.reset("New chat created.", { clearHistory: false });
+    await loadChats({ selectIfMissing: false });
   } catch (err) {
-    ui.setStatus(err.message || "Something went wrong.");
-  } finally {
-    ui.setLoading(false);
+    ui.showToast(err.message || "Failed to create chat", "error");
   }
 }
 
@@ -519,8 +870,30 @@ ui.elements.pageNext.addEventListener("click", () => {
 ui.elements.clear.addEventListener("click", handleClear);
 ui.elements.send.addEventListener("click", () => handleSend([]));
 ui.elements.question.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !ui.elements.send.disabled) handleSend([]);
+  if (e.key === "Enter" && !ui.elements.send.disabled) handleSend([]);
 });
 ui.elements.applyTables.addEventListener("click", handleApplyTables);
+if (ui.elements.newChat) ui.elements.newChat.addEventListener("click", handleNewChat);
+if (ui.elements.chatSearch) {
+  ui.elements.chatSearch.addEventListener("input", () => renderChatList(ui.state.chats));
+}
+
+document.addEventListener("click", closeChatMenus);
 
 updatePagination(0);
+loadChats();
+if (ui.elements.historyDetails) {
+  try {
+    const saved = localStorage.getItem(HISTORY_OPEN_KEY);
+    if (saved === "false") ui.elements.historyDetails.open = false;
+  } catch (_err) {
+    // ignore storage failures
+  }
+  ui.elements.historyDetails.addEventListener("toggle", () => {
+    try {
+      localStorage.setItem(HISTORY_OPEN_KEY, String(ui.elements.historyDetails.open));
+    } catch (_err) {
+      // ignore storage failures
+    }
+  });
+}

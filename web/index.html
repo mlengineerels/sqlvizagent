@@ -9,60 +9,81 @@
   <script src="app.js" defer></script>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Chat With Your Data.</h1>
-    <div class="card">
-      <input id="question" class="pill" placeholder="Ask anything about your data." autocomplete="off" />
-      <button id="send" title="Send">
-        <span class="spinner" aria-hidden="true"></span>
-        <span class="label">➤</span>
-      </button>
-      <button id="clear" class="ghost" title="Clear">Clear</button>
-      <label class="toggle" title="Plan only (skip execution)">
-        <input type="checkbox" id="plan-only" />
-        <span>Plan only</span>
-      </label>
-    </div>
-    <div class="status" id="status"></div>
-    <div class="panel">
-      <details id="tables-details" class="collapsible">
-        <summary>Table choice (click to expand)</summary>
-        <div id="tables-info" class="muted">No table suggestions yet.</div>
-        <div id="tables-chips" class="chips"></div>
-        <div class="table-actions">
-          <button id="apply-tables" class="ghost small" disabled>Use selected tables</button>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-title">Your chats</div>
+        <button id="new-chat" class="ghost small" title="New chat">+</button>
+      </div>
+      <div class="sidebar-search">
+        <input id="chat-search" class="pill small" placeholder="Search chats" autocomplete="off" />
+      </div>
+      <div id="chat-list" class="chat-list"></div>
+    </aside>
+    <main class="main">
+      <div class="wrap">
+        <h1>Chat With Your Data.</h1>
+        <div class="card">
+          <input id="question" class="pill" placeholder="Ask anything about your data." autocomplete="off" />
+          <button id="send" title="Send">
+            <span class="spinner" aria-hidden="true"></span>
+            <span class="label">➤</span>
+          </button>
+          <button id="clear" class="ghost" title="Clear">Clear</button>
+          <label class="toggle" title="Plan only (skip execution)">
+            <input type="checkbox" id="plan-only" />
+            <span>Plan only</span>
+          </label>
         </div>
-      </details>
-      <div class="section-row">
-        <details id="sql-details" class="collapsible">
-          <summary>SQL (click to expand)</summary>
-          <pre id="sql">—</pre>
+        <div class="status" id="status"></div>
+        <details id="history-details" class="collapsible history-collapsible" open>
+          <summary>
+            <span>Conversation</span>
+            <span id="history-count" class="muted"></span>
+          </summary>
+          <div id="chat-history" class="chat-history"></div>
         </details>
-        <button id="copy-sql" class="ghost" title="Copy SQL">Copy</button>
-      </div>
-      <div class="section-row">
-        <details id="rows-details" class="collapsible">
-          <summary>Rows (click to expand)</summary>
-          <div class="table-controls">
-            <div id="page-info">Page 1 / 1</div>
-            <div class="table-controls-buttons">
-              <button id="page-prev" class="ghost small" title="Previous page">Prev</button>
-              <button id="page-next" class="ghost small" title="Next page">Next</button>
+        <div class="panel">
+          <details id="tables-details" class="collapsible">
+            <summary>Table choice (click to expand)</summary>
+            <div id="tables-info" class="muted">No table suggestions yet.</div>
+            <div id="tables-chips" class="chips"></div>
+            <div class="table-actions">
+              <button id="apply-tables" class="ghost small" disabled>Use selected tables</button>
             </div>
+          </details>
+          <div class="section-row">
+            <details id="sql-details" class="collapsible">
+              <summary>SQL (click to expand)</summary>
+              <pre id="sql">—</pre>
+            </details>
+            <button id="copy-sql" class="ghost" title="Copy SQL">Copy</button>
           </div>
-          <div id="rows" class="pane">—</div>
-        </details>
-        <button id="copy-rows" class="ghost" title="Copy rows">Copy</button>
+          <div class="section-row">
+            <details id="rows-details" class="collapsible">
+              <summary>Rows (click to expand)</summary>
+              <div class="table-controls">
+                <div id="page-info">Page 1 / 1</div>
+                <div class="table-controls-buttons">
+                  <button id="page-prev" class="ghost small" title="Previous page">Prev</button>
+                  <button id="page-next" class="ghost small" title="Next page">Next</button>
+                </div>
+              </div>
+              <div id="rows" class="pane">—</div>
+            </details>
+            <button id="copy-rows" class="ghost" title="Copy rows">Copy</button>
+          </div>
+          <details id="figure-details" class="collapsible">
+            <summary>Figure (click to expand)</summary>
+            <div id="chart">No figure yet.</div>
+          </details>
+          <details id="trace-details" class="collapsible">
+            <summary>Trace (click to expand)</summary>
+            <div id="trace" class="pane">—</div>
+          </details>
+        </div>
       </div>
-      <details id="figure-details" class="collapsible">
-        <summary>Figure (click to expand)</summary>
-        <div id="chart">No figure yet.</div>
-      </details>
-      <details id="trace-details" class="collapsible">
-        <summary>Trace (click to expand)</summary>
-        <div id="trace" class="pane">—</div>
-      </details>
-    </div>
+    </main>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>

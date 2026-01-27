@@ -10,6 +10,7 @@ from app.agents.viz_agent import VizAgent
 from app.agents.table_agent import TableAgent
 from app.config import settings
 from app.services.agent_controller import AgentController, ControllerResult
+from app.services.chat_store import append_message, maybe_autotitle_chat
 from app.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class QueryService:
         execute: bool = True,
         plan_only: bool = False,
         tables_override: Optional[List[str]] = None,
+        chat_id: Optional[str] = None,
     ) -> QueryResponse:
         decision = self.router.route(question)
 
@@ -82,6 +84,38 @@ class QueryService:
             plan_only=plan_only,
             tables_override=tables_for_controller,
         )
+
+        if chat_id:
+            try:
+                append_message(
+                    chat_id=chat_id,
+                    role="user",
+                    content=question,
+                    metadata={
+                        "execute": execute,
+                        "plan_only": plan_only,
+                        "tables_override": tables_override or [],
+                    },
+                )
+                maybe_autotitle_chat(chat_id, question)
+                append_message(
+                    chat_id=chat_id,
+                    role="assistant",
+                    content=controller_result.sql or "Result",
+                    metadata={
+                        "sql": controller_result.sql,
+                        "rows": controller_result.rows,
+                        "figure": controller_result.figure,
+                        "intent": controller_result.intent,
+                        "suggested_tables": suggested_tables,
+                        "trace": controller_result.trace,
+                        "plan": controller_result.plan,
+                        "duration_ms": controller_result.duration_ms,
+                        "notes": controller_result.notes,
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Failed to persist chat messages: %s", exc)
 
         return QueryResponse(
             sql=controller_result.sql,
