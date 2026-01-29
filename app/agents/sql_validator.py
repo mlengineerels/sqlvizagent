@@ -23,12 +23,14 @@ class SQLValidator:
         allowed_objects: Sequence[str],
         allowed_columns: Sequence[str],
         max_limit: int = 200,
+        ignore_cte_columns: bool = False,
     ) -> None:
         self.allowed_objects = {obj.lower() for obj in allowed_objects}
         # Also allow unqualified table names for convenience.
         self.allowed_object_names = {obj.split(".")[-1] for obj in self.allowed_objects}
         self.allowed_columns = {col.lower() for col in allowed_columns}
         self.max_limit = max_limit
+        self.ignore_cte_columns = ignore_cte_columns
 
     def _format_table(self, table_expr: exp.Table) -> str:
         """
@@ -77,6 +79,19 @@ class SQLValidator:
         except Exception as exc:
             raise ValueError(f"Failed to parse SQL: {exc}") from exc
 
+        alias_names = {
+            alias.alias_or_name.lower()
+            for select in expr.find_all(exp.Select)
+            for alias in select.expressions
+            if isinstance(alias, exp.Alias) and alias.alias_or_name
+        }
+
+        cte_names = {
+            cte.alias_or_name.lower()
+            for cte in expr.find_all(exp.CTE)
+            if cte.alias_or_name
+        }
+
         # Reject any DML/DDL.
         forbidden_nodes = (exp.Insert, exp.Delete, exp.Update, exp.Create, exp.Drop, exp.Alter)
         if expr.find(forbidden_nodes):
@@ -92,13 +107,19 @@ class SQLValidator:
             simple = table_name.split(".")[-1]
             if self._is_introspection(table_name):
                 continue
+            if table_name in cte_names or simple in cte_names:
+                continue
             if table_name not in self.allowed_objects and simple not in self.allowed_object_names:
                 raise ValueError(f"Query references disallowed object: {table_name}")
 
         # Enforce allowed columns where resolvable.
         for col in expr.find_all(exp.Column):
+            if self.ignore_cte_columns and col.find_ancestor(exp.CTE):
+                continue
             name = col.name
             if not name or name == "*":
+                continue
+            if (col.table in (None, "")) and name.lower() in alias_names:
                 continue
             if name.lower() not in self.allowed_columns:
                 raise ValueError(f"Query references unknown column: {name}")

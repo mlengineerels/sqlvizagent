@@ -41,7 +41,7 @@ class SQLAgent:
         allowed_objects_str = ", ".join(allowed_objects) or "the provided tables/views"
 
         return f"""
-You are an expert {dialect} SQL query generator for a dataset.
+You are an expert {dialect} postgre SQL query generator for a dataset.
 
 You MUST follow these rules:
 
@@ -116,7 +116,7 @@ Schema context (from pgvector retrieval only):
         allowed_objects = ", ".join(self.kb.allowed_objects()) or "the provided tables/views"
 
         system_prompt = f"""
-You are an expert {dialect} SQL fixer. Given a user question, a faulty SQL, and the database error, return a corrected SELECT query.
+You are an expert {dialect} postgres SQL fixer. Given a user question, a faulty postgres SQL, and the database error, return a corrected SELECT query.
 Rules:
 - Only query from the allowed tables/views: {allowed_objects}
 - Only generate read-only SELECT queries.

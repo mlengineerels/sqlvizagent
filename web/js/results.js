@@ -43,6 +43,7 @@ export function buildAssistantMetadata(data, intent, planOnly) {
     plan: data.plan || [],
     duration_ms: data.duration_ms || null,
     notes: data.notes || [],
+    result_snapshot: data.result_snapshot || null,
     plan_only: !!planOnly,
   };
 }

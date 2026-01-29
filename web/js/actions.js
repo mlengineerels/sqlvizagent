@@ -1,13 +1,28 @@
 import { fetchQuery } from "./api.js";
 import { ui, renderTableSuggestions } from "./ui.js";
 import { applyResponse, buildAssistantMetadata } from "./results.js";
-import { addLocalMessage, ensureActiveChat, loadChats, updateActiveChatTitle } from "./chat.js";
+import { addLocalMessage, ensureActiveChat, loadChats, selectChat, updateActiveChatTitle } from "./chat.js";
 
-export async function runQuery(question, tablesOverride = [], planOnly = false) {
+function findLastResultMessage() {
+  return [...(ui.state.messages || [])]
+    .reverse()
+    .find((msg) => msg.role === "assistant" && msg.metadata && msg.metadata.result_snapshot);
+}
+
+export async function runQuery(
+  question,
+  tablesOverride = [],
+  planOnly = false,
+  options = {}
+) {
+  const { forceNew = false } = options || {};
   const chatId = await ensureActiveChat(question);
   updateActiveChatTitle(question);
   ui.state.lastQuestion = question;
   ui.state.lastTablesUsed = tablesOverride;
+  const lastResult = findLastResultMessage();
+  const hasPinnedContext = !!ui.state.activeContextMessageId;
+  const hasContext = (Boolean(chatId && lastResult) || hasPinnedContext) && !forceNew;
 
   addLocalMessage({
     role: "user",
@@ -21,11 +36,61 @@ export async function runQuery(question, tablesOverride = [], planOnly = false) 
   });
 
   ui.setLoading(true);
-  ui.reset();
-  renderTableSuggestions([], { reason: "Finding relevant tables..." });
+  if (hasContext) {
+    ui.setStatus("Working on your follow-up...");
+  } else {
+    ui.reset();
+    renderTableSuggestions([], { reason: "Finding relevant tables..." });
+  }
 
   try {
-    const data = await fetchQuery(question, { tables: tablesOverride, planOnly, chatId });
+    const data = await fetchQuery(question, {
+      tables: tablesOverride,
+      planOnly,
+      chatId,
+      forceNew,
+      contextMessageId: ui.state.activeContextMessageId,
+    });
+    if (!data) throw new Error("No result returned.");
+    if (data.action === "interpret") {
+      addLocalMessage({
+        role: "assistant",
+        content: data.assistant_text || "Explanation",
+        created_at: new Date().toISOString(),
+        metadata: {
+          kind: "interpretation",
+          source_message_id: lastResult?.id || null,
+        },
+      });
+      await loadChats({ selectIfMissing: false });
+      await selectChat(chatId);
+      return;
+    }
+
+    if (
+      data.action === "refine_failed" ||
+      data.action === "interpret_failed" ||
+      data.action === "context_missing"
+    ) {
+      if (data.action === "context_missing") {
+        ui.clearActiveContext();
+      }
+      addLocalMessage({
+        role: "assistant",
+        content: data.assistant_text || "Follow-up failed.",
+        created_at: new Date().toISOString(),
+        metadata: {
+          kind: "followup_failed",
+          fallback_question: data.fallback_question || question,
+          action: data.action,
+        },
+      });
+      await loadChats({ selectIfMissing: false });
+      await selectChat(chatId);
+      return;
+    }
+
+    if (hasContext) ui.reset();
     const intent = data.intent || "";
     applyResponse(data, intent, tablesOverride, planOnly);
 
@@ -37,6 +102,7 @@ export async function runQuery(question, tablesOverride = [], planOnly = false) 
     });
 
     await loadChats({ selectIfMissing: false });
+    await selectChat(chatId);
   } catch (err) {
     ui.setStatus(err.message || "Something went wrong.");
   } finally {
@@ -92,3 +158,6 @@ export async function copyContent(text, label) {
     ui.showToast(`Failed to copy ${label}.`, "error");
   }
 }
+
+ui.actions = ui.actions || {};
+ui.actions.runQuery = runQuery;

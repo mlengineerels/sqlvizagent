@@ -13,7 +13,9 @@ from app.services.chat_store import (
     list_chats,
     rename_chat,
 )
-from app.services.query_service import QueryService
+from app.services.query_service import QueryService, QueryResponse
+from app.services.feedback_store import add_feedback, list_feedback
+from app.services.audit_logger import log_audit_event
 
 router = APIRouter()
 service = QueryService()
@@ -27,9 +29,28 @@ class QueryRequest(BaseModel):
     plan_only: bool = Field(
         False, description="If true, plan/generate SQL but skip execution."
     )
+    force_new: bool = Field(
+        False, description="If true, bypass follow-up handling and treat as new query."
+    )
+    context_message_id: Optional[str] = Field(
+        None, description="Message id to use as follow-up context (from Load result)."
+    )
     session_id: Optional[str] = Field(None, description="Client conversation/session id.")
     chat_id: Optional[str] = Field(None, description="Chat thread id for persistence.")
     tables: Optional[List[str]] = Field(None, description="Explicit tables/views to use (overrides suggestions).")
+
+class ResultSnapshot(BaseModel):
+    sql: str
+    row_count: int
+    rows_sample: List[Dict[str, Any]]
+    columns: List[str]
+    stats: Optional[Dict[str, Any]] = None
+    chart: Optional[Dict[str, Any]] = None
+    summary: Optional[str] = None
+    timestamp: datetime
+    truncated: bool = False
+    column_info: Optional[Dict[str, List[Dict[str, Any]]]] = None
+
 
 class QueryResult(BaseModel):
     sql: str
@@ -41,6 +62,28 @@ class QueryResult(BaseModel):
     plan: Optional[List[Dict[str, Any]]] = None
     duration_ms: Optional[int] = None
     notes: Optional[List[str]] = None
+    result_snapshot: Optional[ResultSnapshot] = None
+    action: Optional[str] = None
+    assistant_text: Optional[str] = None
+    fallback_question: Optional[str] = None
+
+
+def _to_query_result(result: QueryResponse) -> QueryResult:
+    return QueryResult(
+        sql=result.sql,
+        rows=result.rows,
+        figure=result.figure,
+        intent=result.intent,
+        suggested_tables=result.suggested_tables,
+        trace=result.trace,
+        plan=result.plan,
+        duration_ms=result.duration_ms,
+        notes=result.notes,
+        result_snapshot=result.result_snapshot,
+        action=result.action,
+        assistant_text=result.assistant_text,
+        fallback_question=result.fallback_question,
+    )
 
 
 class ChatSummary(BaseModel):
@@ -64,6 +107,36 @@ class ChatDetail(BaseModel):
     messages: List[ChatMessage]
 
 
+class FeedbackRequest(BaseModel):
+    chat_id: str
+    message_id: str
+    rating: int = Field(..., description="1 for upvote, -1 for downvote.")
+    comment: Optional[str] = Field(None, description="Optional feedback comment.")
+
+
+class FeedbackResponse(BaseModel):
+    id: str
+    chat_id: str
+    message_id: str
+    rating: int
+    comment: Optional[str] = None
+    created_at: datetime
+
+
+class ReplayEvent(BaseModel):
+    id: str
+    role: str
+    content: str
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    feedback: Optional[FeedbackResponse] = None
+
+
+class ReplayResponse(BaseModel):
+    chat: ChatSummary
+    events: List[ReplayEvent]
+
+
 class CreateChatRequest(BaseModel):
     title: Optional[str] = Field(None, description="Optional chat title.")
 
@@ -84,23 +157,18 @@ async def query_endpoint(payload: QueryRequest) -> QueryResult:
             plan_only=payload.plan_only,
             tables_override=payload.tables,
             chat_id=payload.chat_id,
+            session_id=payload.session_id,
+            force_new=payload.force_new,
+            context_message_id=payload.context_message_id,
         )
-        return QueryResult(
-            sql=result.sql,
-            rows=result.rows,
-            figure=result.figure,
-            intent=result.intent,
-            suggested_tables=result.suggested_tables,
-            trace=result.trace,
-            plan=result.plan,
-            duration_ms=result.duration_ms,
-            notes=result.notes,
-        )
+        return _to_query_result(result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Query handling failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 @router.get("/chats", response_model=List[ChatSummary])
@@ -173,4 +241,64 @@ async def delete_chat_endpoint(chat_id: str) -> DeleteChatResponse:
         raise
     except Exception as e:
         logger.exception("Failed to delete chat")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/feedback", response_model=FeedbackResponse)
+async def feedback_endpoint(payload: FeedbackRequest) -> FeedbackResponse:
+    if payload.rating not in (-1, 1):
+        raise HTTPException(status_code=400, detail="Rating must be -1 or 1.")
+    try:
+        feedback = add_feedback(
+            chat_id=payload.chat_id,
+            message_id=payload.message_id,
+            rating=payload.rating,
+            comment=payload.comment,
+        )
+        log_audit_event(
+            event_type="feedback",
+            action="feedback",
+            question="",
+            chat_id=payload.chat_id,
+            session_id=None,
+            sql=None,
+            tables=[],
+            row_count=None,
+            extra={"message_id": payload.message_id, "rating": payload.rating},
+        )
+        return FeedbackResponse(**feedback)
+    except Exception as e:
+        logger.exception("Failed to store feedback")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chats/{chat_id}/replay", response_model=ReplayResponse)
+async def replay_endpoint(chat_id: str) -> ReplayResponse:
+    try:
+        chat = get_chat(chat_id)
+        if not chat:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        feedback_entries = list_feedback(chat_id)
+        feedback_map = {f["message_id"]: f for f in feedback_entries}
+        events: List[ReplayEvent] = []
+        for message in chat["messages"]:
+            feedback = feedback_map.get(message["id"])
+            events.append(
+                ReplayEvent(
+                    id=message["id"],
+                    role=message["role"],
+                    content=message["content"],
+                    metadata=message.get("metadata"),
+                    created_at=message["created_at"],
+                    feedback=FeedbackResponse(**feedback) if feedback else None,
+                )
+            )
+        return ReplayResponse(
+            chat=ChatSummary(**chat["chat"]),
+            events=events,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to build replay")
         raise HTTPException(status_code=500, detail=str(e))

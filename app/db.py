@@ -39,7 +39,7 @@ def execute_readonly_query(
     cleaned = sql.strip().rstrip(";").lstrip()
     cleaned_lower = cleaned.lower()
 
-    if not cleaned_lower.startswith("select"):
+    if not (cleaned_lower.startswith("select") or cleaned_lower.startswith("with")):
         raise ValueError("Only SELECT queries are allowed.")
 
     # Reject common DML/DDL keywords.

@@ -1,4 +1,4 @@
-import { apiRequest } from "./api.js";
+import { apiRequest, sendFeedback, fetchReplay } from "./api.js";
 import { ui } from "./ui.js";
 import { loadStoredResult } from "./results.js";
 
@@ -12,6 +12,18 @@ function formatChatTime(value) {
 function buildChatTitle(text) {
   const words = String(text || "").trim().split(/\s+/).slice(0, 6);
   return words.join(" ") || "New chat";
+}
+
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function closeChatMenus() {
@@ -58,23 +70,83 @@ export function renderChatHistory(messages) {
     if (role === "assistant" && msg.metadata) {
       const meta = document.createElement("div");
       meta.className = "message-meta";
-      const rowCount = Array.isArray(msg.metadata.rows) ? msg.metadata.rows.length : 0;
-      const intent = msg.metadata.intent || "unknown";
-      meta.textContent = `Intent: ${intent} • Rows: ${rowCount}`;
-      bubble.appendChild(meta);
+      const kind = msg.metadata.kind || "";
+      if (kind === "interpretation") {
+        meta.textContent = "Explanation of the last result";
+        bubble.appendChild(meta);
+      } else if (kind === "followup_failed") {
+        meta.textContent = "Follow-up could not be applied.";
+        bubble.appendChild(meta);
 
-      const actions = document.createElement("div");
-      actions.className = "message-actions";
-      const loadBtn = document.createElement("button");
-      loadBtn.className = "ghost small";
-      loadBtn.textContent = "Load result";
-      loadBtn.addEventListener("click", (event) => {
-        event.stopPropagation();
-        loadStoredResult(msg.metadata);
-        ui.setStatus("Loaded result from history.");
-      });
-      actions.appendChild(loadBtn);
-      bubble.appendChild(actions);
+        const actions = document.createElement("div");
+        actions.className = "message-actions";
+        const retryQuestion = msg.metadata.fallback_question;
+        if (retryQuestion && ui.actions && typeof ui.actions.runQuery === "function") {
+          const retryBtn = document.createElement("button");
+          retryBtn.className = "ghost small";
+          retryBtn.textContent = "Run as new query";
+          retryBtn.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            ui.elements.question.value = retryQuestion;
+            await ui.actions.runQuery(retryQuestion, [], false, { forceNew: true });
+          });
+          actions.appendChild(retryBtn);
+        }
+        bubble.appendChild(actions);
+      } else {
+        const snapshotCount = msg.metadata.result_snapshot?.row_count;
+        const rowCount = Number.isFinite(snapshotCount)
+          ? snapshotCount
+          : Array.isArray(msg.metadata.rows)
+            ? msg.metadata.rows.length
+            : 0;
+        const intent = msg.metadata.intent || "unknown";
+        meta.textContent = `Intent: ${intent} • Rows: ${rowCount}`;
+        bubble.appendChild(meta);
+
+        const actions = document.createElement("div");
+        actions.className = "message-actions";
+        const loadBtn = document.createElement("button");
+        loadBtn.className = "ghost small";
+        loadBtn.textContent = "Load result";
+        loadBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          loadStoredResult(msg.metadata);
+          ui.setStatus("Loaded result from history.");
+        });
+        actions.appendChild(loadBtn);
+
+        if (msg.id && ui.state.activeChatId) {
+          const upBtn = document.createElement("button");
+          upBtn.className = "ghost small";
+          upBtn.textContent = "+1";
+          upBtn.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            try {
+              await sendFeedback(ui.state.activeChatId, msg.id, 1);
+              ui.showToast("Thanks for the feedback!");
+            } catch (err) {
+              ui.showToast(err.message || "Feedback failed", "error");
+            }
+          });
+          actions.appendChild(upBtn);
+
+          const downBtn = document.createElement("button");
+          downBtn.className = "ghost small";
+          downBtn.textContent = "-1";
+          downBtn.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            try {
+              await sendFeedback(ui.state.activeChatId, msg.id, -1);
+              ui.showToast("Thanks for the feedback!");
+            } catch (err) {
+              ui.showToast(err.message || "Feedback failed", "error");
+            }
+          });
+          actions.appendChild(downBtn);
+        }
+        bubble.appendChild(actions);
+      }
     }
 
     container.appendChild(bubble);
@@ -160,6 +232,21 @@ export function renderChatList(chats) {
     });
     menu.appendChild(renameBtn);
     menu.appendChild(deleteBtn);
+    // Replay JSON export is temporarily disabled.
+    // const replayBtn = document.createElement("button");
+    // replayBtn.textContent = "Replay JSON";
+    // replayBtn.addEventListener("click", async (event) => {
+    //   event.stopPropagation();
+    //   closeChatMenus();
+    //   try {
+    //     const data = await fetchReplay(chat.id);
+    //     downloadJson(data, `chat_${chat.id}_replay.json`);
+    //     ui.showToast("Replay downloaded.");
+    //   } catch (err) {
+    //     ui.showToast(err.message || "Replay failed", "error");
+    //   }
+    // });
+    // menu.appendChild(replayBtn);
 
     menuButton.addEventListener("click", (event) => {
       event.stopPropagation();

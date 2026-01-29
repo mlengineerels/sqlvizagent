@@ -35,6 +35,7 @@ class ControllerResult:
     plan: List[Dict[str, Any]]
     duration_ms: int
     notes: Optional[List[str]] = None
+    usage: Optional[Dict[str, Any]] = None
 
 
 class AgentController:
@@ -95,6 +96,8 @@ class AgentController:
                 schema_override=state.get("schema_context"),
             )
             state["sql"] = res.sql
+            if res.usage:
+                state.setdefault("usage", {})["sql_agent"] = res.usage
             return {"detail": "Drafted SQL", "data": res.sql}
 
         if tool == "plan_viz":
@@ -198,6 +201,8 @@ class AgentController:
                         repair_event.status = "success"
                         repair_event.detail = "Repaired SQL"
                         repair_event.data = repaired.sql
+                        if repaired.usage:
+                            state.setdefault("usage", {})["sql_repair"] = repaired.usage
                         # Re-validate and re-execute once.
                         validated, notes = validator.validate(repaired.sql)
                         state["sql"] = validated
@@ -252,4 +257,5 @@ class AgentController:
             plan=plan_payload,
             duration_ms=duration_ms,
             notes=state.get("notes"),
+            usage=state.get("usage"),
         )
