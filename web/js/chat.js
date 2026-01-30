@@ -112,6 +112,7 @@ export function renderChatHistory(messages) {
         loadBtn.addEventListener("click", (event) => {
           event.stopPropagation();
           loadStoredResult(msg.metadata);
+          if (msg.id) ui.setActiveContext(msg.id);
           ui.setStatus("Loaded result from history.");
         });
         actions.appendChild(loadBtn);
@@ -293,6 +294,7 @@ export async function selectChat(chatId) {
   try {
     const data = await apiRequest(`/api/chats/${chatId}`);
     ui.state.activeChatId = chatId;
+    ui.clearActiveContext();
     ui.state.messages = data.messages || [];
     renderChatList(ui.state.chats);
     renderChatHistory(ui.state.messages);
@@ -346,6 +348,7 @@ export async function handleNewChat() {
       body: JSON.stringify({ title: "New chat" }),
     });
     ui.state.activeChatId = chat.id;
+    ui.clearActiveContext();
     ui.state.messages = [];
     ui.state.lastQuestion = "";
     ui.state.lastTablesUsed = [];

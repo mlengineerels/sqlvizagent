@@ -1,4 +1,4 @@
-import { handleApplyTables, handleClear, handleSend, copyContent } from "./actions.js";
+import { handleApplyTables, handleClear, handleSend, handleNewQuery, copyContent } from "./actions.js";
 import { closeChatMenus, handleNewChat, loadChats, renderChatList } from "./chat.js";
 import { ui, updatePagination } from "./ui.js";
 
@@ -53,6 +53,7 @@ ui.elements.send.addEventListener("click", () => handleSend([]));
 ui.elements.question.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !ui.elements.send.disabled) handleSend([]);
 });
+if (ui.elements.newQuery) ui.elements.newQuery.addEventListener("click", () => handleNewQuery([]));
 ui.elements.applyTables.addEventListener("click", handleApplyTables);
 if (ui.elements.newChat) ui.elements.newChat.addEventListener("click", handleNewChat);
 if (ui.elements.chatSearch) {

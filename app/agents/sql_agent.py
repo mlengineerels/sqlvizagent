@@ -49,9 +49,11 @@ You MUST follow these rules:
 2. Only generate read-only SELECT queries.
 3. Use {dialect} syntax.
 4. Use explicit WHERE, GROUP BY, ORDER BY, LIMIT clauses as needed.
-5. Do NOT modify data (no INSERT, UPDATE, DELETE, CREATE, DROP, etc.).
-6. Respond with ONLY the SQL query. No explanations, comments, or markdown.
-7. Use clear, aliased column names in SELECT when aggregating.
+5. Always include ORDER BY on a reasonable column from the selected columns unless the user explicitly asks for no sorting.
+6. Use DISTINCT by default unless the user explicitly asks for duplicates.
+7. Do NOT modify data (no INSERT, UPDATE, DELETE, CREATE, DROP, etc.).
+8. Respond with ONLY the SQL query. No explanations, comments, or markdown.
+9. Use clear, aliased column names in SELECT when aggregating.
 
 Schema context (from pgvector retrieval only):
 {relevant_schema or "None retrieved; use best judgment with allowed objects only."}
@@ -122,6 +124,8 @@ Rules:
 - Only generate read-only SELECT queries.
 - Use {dialect} syntax.
 - Add a LIMIT if missing to keep results small (<= 200).
+- Always include ORDER BY on a reasonable column from the selected columns unless the user explicitly asks for no sorting.
+- Use DISTINCT by default unless the user explicitly asks for duplicates.
 - Respond with ONLY the SQL query. No explanations, comments, or markdown.
 
 Schema:

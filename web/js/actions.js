@@ -118,6 +118,15 @@ export async function handleSend(tablesOverride = []) {
   await runQuery(question, tablesOverride, planOnly);
 }
 
+export async function handleNewQuery(tablesOverride = []) {
+  const question = ui.elements.question.value.trim();
+  if (!question) return;
+  const planOnly = !!(ui.elements.planOnly && ui.elements.planOnly.checked);
+  ui.elements.question.value = "";
+  ui.clearActiveContext();
+  await runQuery(question, tablesOverride, planOnly, { forceNew: true });
+}
+
 export async function handleApplyTables() {
   if (!ui.state.lastQuestion) {
     ui.showToast("Ask a question first.", "error");

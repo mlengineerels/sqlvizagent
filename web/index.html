@@ -23,26 +23,7 @@
     <main class="main">
       <div class="wrap">
         <h1>Chat With Your Data.</h1>
-        <div class="card">
-          <input id="question" class="pill" placeholder="Ask anything about your data." autocomplete="off" />
-          <button id="send" title="Send">
-            <span class="spinner" aria-hidden="true"></span>
-            <span class="label">➤</span>
-          </button>
-          <button id="clear" class="ghost" title="Clear">Clear</button>
-          <label class="toggle" title="Plan only (skip execution)">
-            <input type="checkbox" id="plan-only" />
-            <span>Plan only</span>
-          </label>
-        </div>
         <div class="status" id="status"></div>
-        <details id="history-details" class="collapsible history-collapsible" open>
-          <summary>
-            <span>Conversation</span>
-            <span id="history-count" class="muted"></span>
-          </summary>
-          <div id="chat-history" class="chat-history"></div>
-        </details>
         <div class="panel">
           <details id="tables-details" class="collapsible">
             <summary>Table choice (click to expand)</summary>
@@ -81,6 +62,26 @@
             <summary>Trace (click to expand)</summary>
             <div id="trace" class="pane">—</div>
           </details>
+        </div>
+        <details id="history-details" class="collapsible history-collapsible" open>
+          <summary>
+            <span>Conversation</span>
+            <span id="history-count" class="muted"></span>
+          </summary>
+          <div id="chat-history" class="chat-history"></div>
+        </details>
+        <div class="card chat-input">
+          <input id="question" class="pill" placeholder="Ask anything about your data." autocomplete="off" />
+          <button id="send" title="Send">
+            <span class="spinner" aria-hidden="true"></span>
+            <span class="label">➤</span>
+          </button>
+          <button id="new-query" class="ghost" title="Run as new query">New query</button>
+          <button id="clear" class="ghost" title="Clear">Clear</button>
+          <label class="toggle" title="Plan only (skip execution)">
+            <input type="checkbox" id="plan-only" />
+            <span>Plan only</span>
+          </label>
         </div>
       </div>
     </main>

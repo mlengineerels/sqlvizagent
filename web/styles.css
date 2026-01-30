@@ -148,7 +148,14 @@ body {
 .chat-menu button:hover { background: #f3f4f6; }
 
 .main { min-width: 0; }
-.wrap { width: 100%; text-align: left; }
+.wrap {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 90px;
+}
 
 h1 {
   font-family: "Space Grotesk", "Manrope", sans-serif;
@@ -173,6 +180,11 @@ h1 {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+.card.chat-input {
+  position: sticky;
+  bottom: 18px;
+  z-index: 3;
 }
 .pill {
   flex: 1;
@@ -247,6 +259,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-height: 45vh;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 .message {
   border-radius: 14px;

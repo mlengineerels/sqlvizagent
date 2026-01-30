@@ -10,7 +10,6 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 try:
-    # openai>=1.x
     from openai import OpenAI
 except ImportError:  # pragma: no cover - best-effort compatibility for 0.x
     OpenAI = None  # type: ignore
@@ -18,7 +17,7 @@ except ImportError:  # pragma: no cover - best-effort compatibility for 0.x
 
 @dataclass
 class IntentPrediction:
-    intent: str  # expected: "retrieval" or "other"
+    intent: str  
     reason: Optional[str] = None
     usage: Optional[Dict[str, Any]] = None
 
@@ -42,12 +41,11 @@ class IntentClassifier:
     def predict(self, question: str) -> IntentPrediction:
         system_prompt = (
             "You classify user questions.\n"
-            "- If the question can be answered by running a SQL query over the MovieLens view, respond with exactly: retrieval\n"
+            "- If the question can be answered by running a SQL query over the database, respond with exactly: retrieval\n"
             "- If the user is asking for a chart/graph/plot or any visualization, respond with exactly: visualization\n"
             "- Otherwise respond with exactly: other\n"
             "Return only the single word label."
         )
-
         logger.info("Classifying intent for question: %s", question)
 
         usage: Optional[Dict[str, Any]] = None

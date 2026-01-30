@@ -14,6 +14,8 @@ from app.agents.viz_agent import VizAgent
 from app.agents.table_agent import TableAgent
 from app.agents.response_interpreter import ResponseInterpreter
 from app.agents.followup_resolver import FollowupResolver
+from app.agents.followup_strategy import FollowupStrategyResolver
+from app.agents.followup_rewriter import FollowupRewriter
 from app.config import settings
 from app.services.agent_controller import AgentController, ControllerResult
 from app.services.audit_logger import log_audit_event
@@ -69,6 +71,8 @@ class QueryService:
         self.table_agent = TableAgent(self.kb)
         self.interpreter = ResponseInterpreter()
         self.followup_resolver = FollowupResolver()
+        self.followup_strategy = FollowupStrategyResolver()
+        self.followup_rewriter = FollowupRewriter()
         self.column_metadata = ColumnMetadataStore(settings.metadata_path)
         self.cache: Optional[Dict[str, List[Dict[str, Any]]]] = {} if settings.enable_query_cache else None
         self.controller = AgentController(
@@ -370,6 +374,73 @@ class QueryService:
         main_sql = expr.sql(dialect="postgres")
         return f"WITH prev AS ({prev_sql}) {main_sql}", None
 
+    def _coerce_enrichment_sql(
+        self,
+        refined_sql: str,
+        previous_sql: str,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        if not refined_sql:
+            return None, "Enrichment returned empty SQL."
+
+        prev_sql = (previous_sql or "").strip().rstrip(";")
+        if not prev_sql:
+            return None, "Missing previous SQL for enrichment."
+
+        try:
+            expr = parse_one(refined_sql, read="postgres")
+        except Exception as exc:
+            return None, f"Could not parse enrichment SQL: {exc}"
+
+        from_expr = expr.args.get("from_")
+        if not from_expr or not isinstance(from_expr.this, exp.Table):
+            return None, "Enrichment must select from prev."
+
+        main_table = from_expr.this
+        main_alias = main_table.alias_or_name or main_table.name
+
+        if main_table.name.lower() != "prev":
+            main_table.set("this", exp.Identifier(this="prev"))
+            main_table.set("db", None)
+            main_table.set("catalog", None)
+
+        cte_names = {
+            cte.alias_or_name.lower()
+            for cte in expr.find_all(exp.CTE)
+            if cte.alias_or_name
+        }
+
+        for table in expr.find_all(exp.Table):
+            if table.find_ancestor(exp.CTE):
+                continue
+            alias = table.alias_or_name or table.name
+            if alias and alias == main_alias:
+                continue
+            if table.name.lower() in {"prev"}:
+                continue
+            if table.name.lower() in cte_names:
+                continue
+            join = table.find_ancestor(exp.Join)
+            if not join:
+                return None, "All additional tables must be joined to prev."
+            on_expr = join.args.get("on")
+            if not on_expr:
+                return None, "Joined tables must include an ON condition."
+            columns = list(on_expr.find_all(exp.Column))
+            has_prev = any(
+                (col.table or "").lower() in {str(main_alias).lower(), "prev"}
+                for col in columns
+            )
+            has_other = any(
+                (col.table or "").lower() == (alias or "").lower()
+                for col in columns
+            )
+            if not (has_prev and has_other):
+                return None, "Join condition must reference prev and the joined table."
+
+        expr.set("with_", None)
+        main_sql = expr.sql(dialect="postgres")
+        return f"WITH prev AS ({prev_sql}) {main_sql}", None
+
     def interpret_result(
         self,
         question: str,
@@ -437,33 +508,55 @@ class QueryService:
         plan_only: bool = False,
         session_id: Optional[str] = None,
         source_message_id: Optional[str] = None,
+        allow_joins: bool = False,
+        refine_question: Optional[str] = None,
+        action_override: str = "refine",
+        extra_metadata: Optional[Dict[str, Any]] = None,
+        audit_extra: Optional[Dict[str, Any]] = None,
     ) -> QueryResponse:
         previous_sql = memory_snapshot.get("sql") or ""
         available_columns = memory_snapshot.get("columns") or []
         if not available_columns:
             raise ValueError("No columns available to refine the previous result.")
-        refined = self.sql_refiner.refine(question, previous_sql, available_columns)
+        effective_question = refine_question or question
+        refined = self.sql_refiner.refine(
+            effective_question,
+            previous_sql,
+            available_columns,
+            allow_joins=allow_joins,
+        )
         usage: Dict[str, Any] = {}
         if refined.usage:
             usage["sql_refiner"] = refined.usage
-        coerced_sql, reason = self._coerce_refinement_sql(refined.sql, previous_sql)
+        if allow_joins:
+            coerced_sql, reason = self._coerce_enrichment_sql(refined.sql, previous_sql)
+        else:
+            coerced_sql, reason = self._coerce_refinement_sql(refined.sql, previous_sql)
         if reason:
             logger.warning("Refinement SQL rejected: %s", reason)
             refined = self.sql_refiner.refine(
-                question,
+                effective_question,
                 previous_sql,
                 available_columns,
                 strict=True,
+                allow_joins=allow_joins,
             )
             if refined.usage:
                 usage["sql_refiner_strict"] = refined.usage
-            coerced_sql, reason = self._coerce_refinement_sql(refined.sql, previous_sql)
+            if allow_joins:
+                coerced_sql, reason = self._coerce_enrichment_sql(refined.sql, previous_sql)
+            else:
+                coerced_sql, reason = self._coerce_refinement_sql(refined.sql, previous_sql)
             if reason:
                 raise ValueError(f"Refinement invalid: {reason}")
 
+        allowed_columns = available_columns
+        if allow_joins:
+            allowed_columns = sorted(set(available_columns).union(self.kb.allowed_columns()))
+
         validator = SQLValidator(
             allowed_objects=self.kb.allowed_objects(),
-            allowed_columns=available_columns,
+            allowed_columns=allowed_columns,
             ignore_cte_columns=True,
         )
         validated_sql, notes = validator.validate(coerced_sql or refined.sql)
@@ -473,27 +566,37 @@ class QueryService:
             rows = execute_readonly_query(
                 validated_sql,
                 allowed_objects=self.kb.allowed_objects(),
-                allowed_columns=available_columns,
+                allowed_columns=allowed_columns,
             )
         tables = self.column_metadata.extract_table_names(validated_sql)
+        audit_metadata = {
+            "source_sql": previous_sql,
+            "source_message_id": source_message_id,
+            "allow_joins": allow_joins,
+        }
+        if effective_question != question:
+            audit_metadata["effective_question"] = effective_question
+        if audit_extra:
+            audit_metadata.update(audit_extra)
         log_audit_event(
             event_type="refine",
-            action="refine",
+            action=action_override,
             question=question,
             chat_id=chat_id,
             session_id=session_id,
             sql=validated_sql,
             tables=tables,
             row_count=len(rows),
-            extra={
-                "source_sql": previous_sql,
-                "source_message_id": source_message_id,
-            },
+            extra=audit_metadata or None,
         )
 
         result_snapshot = self._build_result_snapshot(
             SimpleNamespace(sql=validated_sql, rows=rows, figure=None)
         )
+
+        message_metadata = dict(extra_metadata or {})
+        if effective_question != question:
+            message_metadata.setdefault("effective_question", effective_question)
 
         append_message(
             chat_id=chat_id,
@@ -503,6 +606,8 @@ class QueryService:
                 "kind": "followup_refine",
                 "source_sql": previous_sql,
                 "source_message_id": source_message_id,
+                "allow_joins": allow_joins,
+                **message_metadata,
             },
         )
         append_message(
@@ -522,6 +627,8 @@ class QueryService:
                 "notes": notes,
                 "result_snapshot": result_snapshot,
                 "source_message_id": source_message_id,
+                "allow_joins": allow_joins,
+                **message_metadata,
             },
         )
 
@@ -536,7 +643,137 @@ class QueryService:
             duration_ms=None,
             notes=notes,
             result_snapshot=result_snapshot,
-            action="refine",
+            action=action_override,
+            usage=usage or None,
+        )
+
+    def _run_new_query(
+        self,
+        question: str,
+        effective_question: Optional[str],
+        execute: bool,
+        plan_only: bool,
+        tables_override: Optional[List[str]],
+        chat_id: Optional[str],
+        session_id: Optional[str],
+        action_override: str,
+        start_time: Optional[float] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+        audit_extra: Optional[Dict[str, Any]] = None,
+        usage_prefix: Optional[Dict[str, Any]] = None,
+    ) -> QueryResponse:
+        start = start_time or time.perf_counter()
+        effective = effective_question or question
+        decision = self.router.route(effective)
+
+        if decision.agent not in {"viz_agent", "sql_agent"}:
+            raise ValueError(
+                "Sorry, no agent is available to handle this question. "
+                "Please try rephrasing or ask a data or visualization question."
+            )
+
+        suggested_tables = tables_override or self.table_agent.suggest(effective)
+        tables_for_controller = tables_override if tables_override else None
+
+        if decision.usage:
+            logger.info("Intent classifier usage: %s", decision.usage)
+        if suggested_tables:
+            logger.info("Suggested tables for question '%s': %s", effective, suggested_tables)
+
+        controller_result: ControllerResult = self.controller.run(
+            question=effective,
+            intent=decision.intent,
+            execute=execute,
+            plan_only=plan_only,
+            tables_override=tables_for_controller,
+        )
+        result_snapshot = self._build_result_snapshot(controller_result)
+        tables = self.column_metadata.extract_table_names(controller_result.sql)
+        extra: Dict[str, Any] = {}
+        if effective != question:
+            extra["effective_question"] = effective
+        if audit_extra:
+            extra.update(audit_extra)
+        log_audit_event(
+            event_type="query",
+            action=action_override,
+            question=question,
+            chat_id=chat_id,
+            session_id=session_id,
+            sql=controller_result.sql,
+            tables=tables,
+            row_count=len(controller_result.rows or []),
+            extra=extra or None,
+        )
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        usage: Dict[str, Any] = dict(usage_prefix or {})
+        if decision.usage:
+            usage["intent_classifier"] = decision.usage
+        if controller_result.usage:
+            usage.update(controller_result.usage)
+        self._log_metrics(
+            action=action_override,
+            question=question,
+            duration_ms=duration_ms,
+            chat_id=chat_id,
+            session_id=session_id,
+            usage=usage or None,
+        )
+
+        if chat_id:
+            try:
+                user_meta = {
+                    "execute": execute,
+                    "plan_only": plan_only,
+                    "tables_override": tables_override or [],
+                }
+                assistant_meta = {
+                    "sql": controller_result.sql,
+                    "rows": controller_result.rows,
+                    "figure": controller_result.figure,
+                    "intent": controller_result.intent,
+                    "suggested_tables": suggested_tables,
+                    "trace": controller_result.trace,
+                    "plan": controller_result.plan,
+                    "duration_ms": duration_ms,
+                    "notes": controller_result.notes,
+                    "result_snapshot": result_snapshot,
+                }
+                if effective != question:
+                    user_meta["effective_question"] = effective
+                    assistant_meta["effective_question"] = effective
+                if extra_metadata:
+                    user_meta.update(extra_metadata)
+                    assistant_meta.update(extra_metadata)
+                append_message(
+                    chat_id=chat_id,
+                    role="user",
+                    content=question,
+                    metadata=user_meta,
+                )
+                maybe_autotitle_chat(chat_id, question)
+                append_message(
+                    chat_id=chat_id,
+                    role="assistant",
+                    content=controller_result.sql or "Result",
+                    metadata=assistant_meta,
+                )
+            except Exception as exc:
+                logger.warning("Failed to persist chat messages: %s", exc)
+
+        return QueryResponse(
+            sql=controller_result.sql,
+            rows=controller_result.rows,
+            figure=controller_result.figure,
+            intent=controller_result.intent,
+            suggested_tables=suggested_tables,
+            trace=controller_result.trace,
+            plan=controller_result.plan,
+            duration_ms=duration_ms,
+            notes=controller_result.notes,
+            result_snapshot=result_snapshot,
+            action=action_override,
             usage=usage or None,
         )
 
@@ -557,6 +794,11 @@ class QueryService:
             memory = None
             pinned_context = False
             if context_message_id:
+                logger.info(
+                    "Pinned context requested (chat_id=%s, message_id=%s)",
+                    chat_id,
+                    context_message_id,
+                )
                 memory = get_result_snapshot(chat_id, context_message_id)
                 if memory:
                     pinned_context = True
@@ -623,6 +865,7 @@ class QueryService:
                     last_summary = memory.snapshot.get("summary") or ""
                     last_sql = memory.snapshot.get("sql") or ""
                     decision = self.followup_resolver.resolve(question, last_summary, last_sql)
+                    explicit_ref = self.followup_resolver._has_explicit_reference(question) or pinned_context
                     logger.info(
                         "Follow-up resolver decision: %s (reason=%s)",
                         decision.action,
@@ -716,8 +959,65 @@ class QueryService:
                                 usage=usage,
                             )
                     if decision.action == "refine":
-                        logger.info("Routing to refinement for follow-up.")
+                        logger.info("Routing to follow-up handling.")
                         try:
+                            if pinned_context:
+                                available_cols = ", ".join(memory.snapshot.get("columns") or [])
+                                strategy = self.followup_strategy.resolve(
+                                    question,
+                                    last_summary,
+                                    last_sql,
+                                    available_cols or "(unknown)",
+                                )
+                                if strategy.strategy == "rewrite":
+                                    rewritten = self.followup_rewriter.rewrite(
+                                        question,
+                                        last_summary,
+                                        last_sql,
+                                    )
+                                    result = self._refine_from_snapshot(
+                                        question,
+                                        chat_id=chat_id,
+                                        memory_snapshot=memory.snapshot,
+                                        execute=execute,
+                                        plan_only=plan_only,
+                                        session_id=session_id,
+                                        source_message_id=memory.message_id,
+                                        allow_joins=True,
+                                        refine_question=rewritten.question,
+                                        action_override="rewrite",
+                                        extra_metadata={
+                                            "rewrite_from_followup": True,
+                                            "rewrite_strategy": "rewrite",
+                                        },
+                                        audit_extra={
+                                            "rewrite_from_followup": True,
+                                            "rewrite_strategy": "rewrite",
+                                        },
+                                    )
+                                    duration_ms = int((time.perf_counter() - start_time) * 1000)
+                                    result.duration_ms = duration_ms
+                                    usage: Dict[str, Any] = {}
+                                    if decision.usage:
+                                        usage["followup_resolver"] = decision.usage
+                                    if strategy.usage:
+                                        usage["followup_strategy"] = strategy.usage
+                                    if rewritten.usage:
+                                        usage["followup_rewriter"] = rewritten.usage
+                                    if result.usage:
+                                        usage.update(result.usage)
+                                    usage["pinned_context"] = {"message_id": memory.message_id}
+                                    self._log_metrics(
+                                        action="rewrite",
+                                        question=question,
+                                        duration_ms=duration_ms,
+                                        chat_id=chat_id,
+                                        session_id=session_id,
+                                        usage=usage or None,
+                                    )
+                                    result.usage = usage or None
+                                    return result
+
                             result = self._refine_from_snapshot(
                                 question,
                                 chat_id=chat_id,
@@ -726,11 +1026,12 @@ class QueryService:
                                 plan_only=plan_only,
                                 session_id=session_id,
                                 source_message_id=memory.message_id,
+                                allow_joins=explicit_ref,
                             )
                             result.action = "refine"
                             duration_ms = int((time.perf_counter() - start_time) * 1000)
                             result.duration_ms = duration_ms
-                            usage = {}
+                            usage: Dict[str, Any] = {}
                             if decision.usage:
                                 usage["followup_resolver"] = decision.usage
                             if result.usage:
@@ -750,6 +1051,56 @@ class QueryService:
                         except Exception as exc:
                             reason = str(exc)
                             logger.warning("Refinement failed: %s", exc)
+                            if pinned_context and "unknown column" in reason.lower():
+                                logger.info("Refine failed due to missing columns; attempting rewrite fallback.")
+                                try:
+                                    rewritten = self.followup_rewriter.rewrite(
+                                        question,
+                                        last_summary,
+                                        last_sql,
+                                    )
+                                    result = self._refine_from_snapshot(
+                                        question,
+                                        chat_id=chat_id,
+                                        memory_snapshot=memory.snapshot,
+                                        execute=execute,
+                                        plan_only=plan_only,
+                                        session_id=session_id,
+                                        source_message_id=memory.message_id,
+                                        allow_joins=True,
+                                        refine_question=rewritten.question,
+                                        action_override="rewrite_fallback",
+                                        extra_metadata={
+                                            "rewrite_from_followup": True,
+                                            "rewrite_fallback": True,
+                                        },
+                                        audit_extra={
+                                            "rewrite_from_followup": True,
+                                            "rewrite_fallback": True,
+                                        },
+                                    )
+                                    duration_ms = int((time.perf_counter() - start_time) * 1000)
+                                    result.duration_ms = duration_ms
+                                    usage: Dict[str, Any] = {}
+                                    if decision.usage:
+                                        usage["followup_resolver"] = decision.usage
+                                    if rewritten.usage:
+                                        usage["followup_rewriter"] = rewritten.usage
+                                    usage["pinned_context"] = {"message_id": memory.message_id}
+                                    if result.usage:
+                                        usage.update(result.usage)
+                                    self._log_metrics(
+                                        action="rewrite_fallback",
+                                        question=question,
+                                        duration_ms=duration_ms,
+                                        chat_id=chat_id,
+                                        session_id=session_id,
+                                        usage=usage or None,
+                                    )
+                                    result.usage = usage or None
+                                    return result
+                                except Exception as fallback_exc:
+                                    logger.warning("Rewrite fallback failed: %s", fallback_exc)
                             assistant_text = (
                                 "I couldn't safely refine the previous result. "
                                 "You can run this as a new query instead."
@@ -798,101 +1149,17 @@ class QueryService:
             else:
                 logger.info("No follow-up context found; handling as new query.")
 
-        decision = self.router.route(question)
-
-        if decision.agent not in {"viz_agent", "sql_agent"}:
-            raise ValueError(
-                "Sorry, no agent is available to handle this question. "
-                "Please try rephrasing or ask a data or visualization question."
-            )
-
-        suggested_tables = tables_override or self.table_agent.suggest(question)
-        tables_for_controller = tables_override if tables_override else None
-
-        if decision.usage:
-            logger.info("Intent classifier usage: %s", decision.usage)
-        if suggested_tables:
-            logger.info("Suggested tables for question '%s': %s", question, suggested_tables)
-
-        controller_result: ControllerResult = self.controller.run(
+        return self._run_new_query(
             question=question,
-            intent=decision.intent,
+            effective_question=None,
             execute=execute,
             plan_only=plan_only,
-            tables_override=tables_for_controller,
-        )
-        result_snapshot = self._build_result_snapshot(controller_result)
-        tables = self.column_metadata.extract_table_names(controller_result.sql)
-        log_audit_event(
-            event_type="query",
-            action="new",
-            question=question,
+            tables_override=tables_override,
             chat_id=chat_id,
             session_id=session_id,
-            sql=controller_result.sql,
-            tables=tables,
-            row_count=len(controller_result.rows or []),
-        )
-
-        duration_ms = int((time.perf_counter() - start_time) * 1000)
-        usage = {}
-        if decision.usage:
-            usage["intent_classifier"] = decision.usage
-        if controller_result.usage:
-            usage.update(controller_result.usage)
-        self._log_metrics(
-            action="new",
-            question=question,
-            duration_ms=duration_ms,
-            chat_id=chat_id,
-            session_id=session_id,
-            usage=usage or None,
-        )
-
-        if chat_id:
-            try:
-                append_message(
-                    chat_id=chat_id,
-                    role="user",
-                    content=question,
-                    metadata={
-                        "execute": execute,
-                        "plan_only": plan_only,
-                        "tables_override": tables_override or [],
-                    },
-                )
-                maybe_autotitle_chat(chat_id, question)
-                append_message(
-                    chat_id=chat_id,
-                    role="assistant",
-                    content=controller_result.sql or "Result",
-                    metadata={
-                        "sql": controller_result.sql,
-                        "rows": controller_result.rows,
-                        "figure": controller_result.figure,
-                        "intent": controller_result.intent,
-                        "suggested_tables": suggested_tables,
-                        "trace": controller_result.trace,
-                        "plan": controller_result.plan,
-                        "duration_ms": duration_ms,
-                        "notes": controller_result.notes,
-                        "result_snapshot": result_snapshot,
-                    },
-                )
-            except Exception as exc:
-                logger.warning("Failed to persist chat messages: %s", exc)
-
-        return QueryResponse(
-            sql=controller_result.sql,
-            rows=controller_result.rows,
-            figure=controller_result.figure,
-            intent=controller_result.intent,
-            suggested_tables=suggested_tables,
-            trace=controller_result.trace,
-            plan=controller_result.plan,
-            duration_ms=duration_ms,
-            notes=controller_result.notes,
-            result_snapshot=result_snapshot,
-            action="new",
-            usage=usage or None,
+            action_override="new",
+            start_time=start_time,
+            extra_metadata=None,
+            audit_extra=None,
+            usage_prefix=None,
         )

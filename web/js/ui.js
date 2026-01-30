@@ -18,6 +18,7 @@ export const ui = (() => {
     copySql: document.getElementById("copy-sql"),
     copyRows: document.getElementById("copy-rows"),
     clear: document.getElementById("clear"),
+    newQuery: document.getElementById("new-query"),
     planOnly: document.getElementById("plan-only"),
     pagePrev: document.getElementById("page-prev"),
     pageNext: document.getElementById("page-next"),
@@ -49,6 +50,7 @@ export const ui = (() => {
     chats: [],
     activeChatId: null,
     messages: [],
+    activeContextMessageId: null,
   };
   const toast = document.getElementById("toast");
   let toastTimer = null;
@@ -240,6 +242,7 @@ export const ui = (() => {
     elements.send.disabled = isLoading;
     elements.clear.disabled = isLoading;
     elements.question.disabled = isLoading;
+    if (elements.newQuery) elements.newQuery.disabled = isLoading;
     if (elements.newChat) elements.newChat.disabled = isLoading;
     if (elements.chatSearch) elements.chatSearch.disabled = isLoading;
   };
@@ -265,6 +268,14 @@ export const ui = (() => {
     }
   };
 
+  const setActiveContext = (messageId) => {
+    state.activeContextMessageId = messageId || null;
+  };
+
+  const clearActiveContext = () => {
+    state.activeContextMessageId = null;
+  };
+
   return {
     elements,
     state,
@@ -276,6 +287,8 @@ export const ui = (() => {
     reset,
     setLoading,
     showToast,
+    setActiveContext,
+    clearActiveContext,
   };
 })();
 

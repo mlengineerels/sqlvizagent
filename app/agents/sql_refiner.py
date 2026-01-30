@@ -7,8 +7,8 @@ import openai
 
 try:
     from openai import OpenAI
-except ImportError:  # pragma: no cover
-    OpenAI = None  # type: ignore
+except ImportError: 
+    OpenAI = None  
 
 from app.config import settings
 
@@ -37,20 +37,27 @@ class SQLRefiner:
             self.client = None
             self.use_client = False
 
-    def _system_prompt(self, available_columns: List[str], strict: bool) -> str:
+    def _system_prompt(self, available_columns: List[str], strict: bool, allow_joins: bool) -> str:
         columns = ", ".join(available_columns) if available_columns else "(unknown)"
         prompt = (
             "You are a SQL refiner for Postgres.\n"
             "Given a user follow-up and the previous SQL, return a refined SQL query.\n"
             "Rules:\n"
-            "- Use a CTE named prev: WITH prev AS (<previous_sql>)\n"
-            "- Query ONLY from prev. Do not reference base tables directly.\n"
-            "- Use only these columns from prev: " + columns + "\n"
-            "- Return ONLY the SQL query, no explanations.\n"
-            "- SELECT-only, no DML/DDL."
+            "- Always define: WITH prev AS (<previous_sql>)\n"
+            "- The final SELECT must include prev.\n"
+            "- You MAY join base tables ONLY if required to add new columns not present in prev.\n"
+            "- Any base table must be joined THROUGH prev (prev must be the left or primary source).\n"
+            "- Do NOT rewrite the logic of prev unless explicitly requested.\n"
+            "- Use only these columns from prev when possible: " + columns + "\n"
+            "- SELECT-only. No DML/DDL.\n"
+            "- Always include ORDER BY on a reasonable column from the selected columns unless the user explicitly asks for no sorting.\n"
+            "- Use DISTINCT by default unless the user explicitly asks for duplicates.\n"
+            "- Return ONLY the SQL query. No explanations."
         )
+        if not allow_joins:
+            prompt += "\nDo NOT join base tables; query ONLY from prev."
         if strict:
-            prompt += "\nIf you reference any base table instead of prev, your output will be rejected."
+            prompt += "\nIf you reference a base table without joining it to prev, the output will be rejected."
         return prompt
 
     def refine(
@@ -59,12 +66,13 @@ class SQLRefiner:
         previous_sql: str,
         available_columns: List[str],
         strict: bool = False,
+        allow_joins: bool = False,
     ) -> RefinementResult:
         if not previous_sql:
             raise ValueError("Missing previous SQL for refinement.")
 
         messages = [
-            {"role": "system", "content": self._system_prompt(available_columns, strict)},
+            {"role": "system", "content": self._system_prompt(available_columns, strict, allow_joins)},
             {
                 "role": "user",
                 "content": (
