@@ -74,8 +74,8 @@ export const ui = (() => {
 
   const setSQL = (sql, { store = true } = {}) => {
     if (store) state.sql = sql || "";
-    elements.sql.textContent = sql || "—";
-    elements.sqlDetails.open = false;
+    if (elements.sql) elements.sql.textContent = sql || "—";
+    if (elements.sqlDetails) elements.sqlDetails.open = false;
   };
 
   const clearRows = () => {
@@ -291,6 +291,23 @@ export const ui = (() => {
     clearActiveContext,
   };
 })();
+
+export async function copyContent(text, label) {
+  if (!text || !text.trim()) {
+    ui.showToast(`No ${label} to copy.`, "error");
+    return;
+  }
+  if (!navigator.clipboard) {
+    ui.showToast("Clipboard not available in this browser.", "error");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    ui.showToast(`${label} copied!`, "success");
+  } catch (_err) {
+    ui.showToast(`Failed to copy ${label}.`, "error");
+  }
+}
 
 export function sortRows(rows) {
   const { sortBy, sortDir } = ui.state;

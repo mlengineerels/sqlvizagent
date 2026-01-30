@@ -423,8 +423,12 @@ details.collapsible pre {
   display: flex;
   align-items: flex-start;
   gap: 10px;
+  min-width: 0;
 }
-.section-row details { flex: 1; }
+.section-row details {
+  flex: 1;
+  min-width: 0;
+}
 
 .spinner {
   width: 16px;

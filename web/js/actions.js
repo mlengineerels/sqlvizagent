@@ -151,22 +151,5 @@ export function handleClear() {
   ui.setStatus("Cleared");
 }
 
-export async function copyContent(text, label) {
-  if (!text || !text.trim()) {
-    ui.showToast(`No ${label} to copy.`, "error");
-    return;
-  }
-  if (!navigator.clipboard) {
-    ui.showToast("Clipboard not available in this browser.", "error");
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(text);
-    ui.showToast(`${label} copied!`, "success");
-  } catch (err) {
-    ui.showToast(`Failed to copy ${label}.`, "error");
-  }
-}
-
 ui.actions = ui.actions || {};
 ui.actions.runQuery = runQuery;

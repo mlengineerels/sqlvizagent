@@ -1,6 +1,6 @@
-import { handleApplyTables, handleClear, handleSend, handleNewQuery, copyContent } from "./actions.js";
+import { handleApplyTables, handleClear, handleSend, handleNewQuery } from "./actions.js";
 import { closeChatMenus, handleNewChat, loadChats, renderChatList } from "./chat.js";
-import { ui, updatePagination } from "./ui.js";
+import { ui, updatePagination, copyContent } from "./ui.js";
 
 const SESSION_KEY = "nl2sql-session-id";
 const HISTORY_OPEN_KEY = "nl2sql-history-open";
@@ -21,9 +21,11 @@ function ensureSessionId() {
 
 ui.state.sessionId = ensureSessionId();
 
-ui.elements.copySql.addEventListener("click", () => {
-  copyContent(ui.state.sql, "SQL");
-});
+if (ui.elements.copySql) {
+  ui.elements.copySql.addEventListener("click", () => {
+    copyContent(ui.state.sql, "SQL");
+  });
+}
 
 ui.elements.copyRows.addEventListener("click", () => {
   const rowsText = ui.state.rows && ui.state.rows.length

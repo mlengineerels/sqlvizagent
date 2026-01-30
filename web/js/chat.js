@@ -1,5 +1,5 @@
 import { apiRequest, sendFeedback, fetchReplay } from "./api.js";
-import { ui } from "./ui.js";
+import { ui, copyContent } from "./ui.js";
 import { loadStoredResult } from "./results.js";
 
 function formatChatTime(value) {
@@ -116,6 +116,17 @@ export function renderChatHistory(messages) {
           ui.setStatus("Loaded result from history.");
         });
         actions.appendChild(loadBtn);
+
+        if (msg.metadata.sql) {
+          const copyBtn = document.createElement("button");
+          copyBtn.className = "ghost small";
+          copyBtn.textContent = "Copy SQL";
+          copyBtn.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            await copyContent(msg.metadata.sql, "SQL");
+          });
+          actions.appendChild(copyBtn);
+        }
 
         if (msg.id && ui.state.activeChatId) {
           const upBtn = document.createElement("button");
