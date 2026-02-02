@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap");
 
 :root {
   --bg: #f7f7f4;
@@ -21,25 +21,41 @@ body {
   font-family: "Manrope", "Segoe UI", sans-serif;
   background: var(--bg);
   color: var(--text);
-  padding: 30px 16px 44px;
+  padding: 16px 12px 32px 8px;
 }
 .app-shell {
-  width: min(1200px, 96vw);
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
   display: grid;
   grid-template-columns: 260px 1fr;
-  gap: 28px;
-  align-items: start;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "spacer header"
+    "sidebar main";
+  gap: 16px;
+  align-items: stretch;
+}
+.shell-spacer {
+  grid-area: spacer;
+}
+.shell-header {
+  grid-area: header;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 .sidebar {
+  grid-area: sidebar;
   background: var(--sidebar);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 16px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  min-height: 80vh;
+  gap: 10px;
+  min-height: 0;
+  height: 100%;
   box-shadow: var(--shadow-soft);
 }
 .sidebar-header {
@@ -50,12 +66,19 @@ body {
 }
 .sidebar-title {
   font-weight: 600;
-  font-size: 16px;
+  font-size: 15px;
+  line-height: 1.2;
   color: var(--text);
   font-family: "Space Grotesk", "Manrope", sans-serif;
 }
 .sidebar-search {
-  margin-top: 2px;
+  margin-top: 0;
+}
+.sidebar-header .ghost {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 10px;
 }
 .chat-list {
   display: flex;
@@ -64,6 +87,7 @@ body {
   overflow-y: auto;
   padding-right: 4px;
   flex: 1;
+  min-height: 0;
 }
 .chat-item {
   position: relative;
@@ -147,7 +171,10 @@ body {
 }
 .chat-menu button:hover { background: #f3f4f6; }
 
-.main { min-width: 0; }
+.main {
+  min-width: 0;
+  grid-area: main;
+}
 .wrap {
   width: 100%;
   text-align: left;
@@ -155,6 +182,27 @@ body {
   flex-direction: column;
   gap: 16px;
   padding-bottom: 90px;
+}
+.content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: start;
+}
+.content-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.right-rail {
+  position: sticky;
+  top: 16px;
+}
+.rail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 h1 {
@@ -240,6 +288,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
   font-size: 14px;
   min-height: 18px;
 }
+.shell-header .status { margin-top: 0; }
 
 .panel {
   margin-top: 24px;
@@ -259,7 +308,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: 45vh;
+  max-height: 52vh;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -294,6 +343,22 @@ button:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
 .message-content {
   font-size: 14px;
   color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.message-content.sql-content {
+  padding: 0;
+}
+.sql-block {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #0b1220;
+  color: #e2e8f0;
+  border: 1px solid #1f2937;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -523,8 +588,20 @@ details.collapsible pre {
 .trace-item.status-unknown { border-color: #d1d5db; }
 
 @media (max-width: 900px) {
-  .app-shell { grid-template-columns: 1fr; }
-  .sidebar { min-height: auto; }
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "header"
+      "sidebar"
+      "main";
+  }
+  .shell-spacer { display: none; }
+  .sidebar {
+    min-height: auto;
+    height: auto;
+  }
   .message { max-width: 100%; }
   h1 { font-size: 32px; }
+  .content-grid { grid-template-columns: 1fr; }
+  .right-rail { position: static; }
 }

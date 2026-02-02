@@ -62,7 +62,20 @@ export function renderChatHistory(messages) {
 
     const body = document.createElement("div");
     body.className = "message-content";
-    body.textContent = msg.content || "";
+    const content = msg.content || "";
+    const isSqlMessage = role === "assistant"
+      && msg.metadata
+      && msg.metadata.sql
+      && String(content).trim() === String(msg.metadata.sql).trim();
+    if (isSqlMessage) {
+      body.classList.add("sql-content");
+      const pre = document.createElement("pre");
+      pre.className = "sql-block";
+      pre.textContent = content;
+      body.appendChild(pre);
+    } else {
+      body.textContent = content;
+    }
 
     bubble.appendChild(header);
     bubble.appendChild(body);

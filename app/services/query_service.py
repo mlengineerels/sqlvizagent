@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
-
 from app.agents.knowledge_base import KnowledgeBase
 from app.agents.router import RouterAgent
 from app.agents.sql_agent import SQLAgent
