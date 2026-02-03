@@ -1,8 +1,6 @@
 # app/agents/router.py
-import re
 from dataclasses import dataclass
 from typing import Literal, Optional, Dict, Any
-import re
 
 from app.agents.intent_classifier import IntentClassifier, IntentPrediction
 
@@ -21,33 +19,10 @@ class RouterAgent:
     retrieval intents to the SQL agent.
     """
 
-    VIZ_KEYWORDS = [
-        r"\bplot\b",
-        r"\bchart\b",
-        r"\bgraph\b",
-        r"\bvisual",
-        r"\bbar chart\b",
-        r"\bline chart\b",
-        r"\bscatter\b",
-        r"\bpie\b",
-    ]
-
     def __init__(self) -> None:
         self.classifier = IntentClassifier()
 
     def route(self, question: str) -> RouteDecision:
-        q = question.lower()
-
-        # Fast heuristic for visualization intents to reduce LLM calls and avoid misclassification.
-        for pattern in self.VIZ_KEYWORDS:
-            if re.search(pattern, q):
-                return RouteDecision(
-                    agent="viz_agent",
-                    reason=f"Matched visualization keyword: {pattern}",
-                    intent="visualization",
-                    usage=None,
-                )
-
         try:
             prediction: IntentPrediction = self.classifier.predict(question)
         except Exception as exc:

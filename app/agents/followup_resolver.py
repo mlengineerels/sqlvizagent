@@ -56,8 +56,6 @@ class FollowupResolver:
         )
 
     def resolve(self, question: str, last_summary: str, last_sql: str) -> FollowupDecision:
-        explicit_ref = self._has_explicit_reference(question)
-        explain_like = self._is_explanation_request(question)
         messages = [
             {"role": "system", "content": self._system_prompt()},
             {
@@ -104,41 +102,5 @@ class FollowupResolver:
             action = "new"
 
         reason = f"LLM label: {label}"
-        if action == "new" and explicit_ref:
-            action = "interpret" if explain_like else "refine"
-            reason = f"{reason} (override: explicit_reference)"
 
         return FollowupDecision(action=action, reason=reason, usage=usage)
-
-    @staticmethod
-    def _has_explicit_reference(question: str) -> bool:
-        q = question.lower()
-        tokens = [
-            "from above",
-            "above result",
-            "from the results",
-            "from results",
-            "previous result",
-            "last result",
-            "same as before",
-            "those",
-            "these",
-            "that list",
-            "earlier",
-            "previous",
-        ]
-        return any(token in q for token in tokens)
-
-    @staticmethod
-    def _is_explanation_request(question: str) -> bool:
-        q = question.lower()
-        tokens = [
-            "what does",
-            "what do",
-            "mean",
-            "explain",
-            "why",
-            "interpret",
-            "summary",
-        ]
-        return any(token in q for token in tokens)

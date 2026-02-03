@@ -12,14 +12,14 @@ from app.agents.sql_refiner import SQLRefiner
 from app.agents.viz_agent import VizAgent
 from app.agents.table_agent import TableAgent
 from app.agents.response_interpreter import ResponseInterpreter
-from app.agents.followup_resolver import FollowupResolver
+from app.agents.context_resolver import ContextResolver, ContextCandidate
 from app.agents.followup_strategy import FollowupStrategyResolver
 from app.agents.followup_rewriter import FollowupRewriter
 from app.config import settings
 from app.services.agent_controller import AgentController, ControllerResult
 from app.services.audit_logger import log_audit_event
 from app.services.chat_store import append_message, maybe_autotitle_chat
-from app.services.result_memory import get_last_result_snapshot, get_result_snapshot
+from app.services.result_memory import get_last_result_snapshot, get_result_snapshot, list_recent_result_snapshots
 from app.agents.sql_validator import SQLValidator
 from app.vector_store import VectorStore
 from app.db import execute_readonly_query
@@ -69,7 +69,7 @@ class QueryService:
         self.viz_agent = VizAgent(self.kb)
         self.table_agent = TableAgent(self.kb)
         self.interpreter = ResponseInterpreter()
-        self.followup_resolver = FollowupResolver()
+        self.context_resolver = ContextResolver()
         self.followup_strategy = FollowupStrategyResolver()
         self.followup_rewriter = FollowupRewriter()
         self.column_metadata = ColumnMetadataStore(settings.metadata_path)
@@ -847,46 +847,162 @@ class QueryService:
                         assistant_text=assistant_text,
                         fallback_question=question,
                     )
-            if memory is None:
-                memory = get_last_result_snapshot(chat_id)
+            memories = []
             if memory:
-                if not pinned_context and not self._is_snapshot_fresh(memory.snapshot):
-                    logger.info(
-                        "Follow-up context is stale; handling as new query (chat_id=%s)",
-                        chat_id,
+                memories = [memory]
+            else:
+                limit = max(settings.followup_context_max_results, 1)
+                memories = list_recent_result_snapshots(chat_id, limit=limit)
+                if settings.followup_context_ttl_minutes > 0:
+                    memories = [m for m in memories if self._is_snapshot_fresh(m.snapshot)]
+
+            if memories:
+                candidates = [
+                    ContextCandidate(
+                        message_id=m.message_id,
+                        summary=m.snapshot.get("summary") or "",
+                        sql=m.snapshot.get("sql") or "",
+                        columns=m.snapshot.get("columns") or [],
+                        timestamp=m.snapshot.get("timestamp"),
                     )
-                else:
-                    logger.info(
-                        "Follow-up context found (chat_id=%s, message_id=%s)",
-                        chat_id,
-                        memory.message_id,
+                    for m in memories
+                ]
+                decision = self.context_resolver.resolve(
+                    question,
+                    candidates=candidates,
+                    pinned=pinned_context,
+                )
+                logger.info(
+                    "Context resolver decision: %s (reason=%s)",
+                    decision.action,
+                    decision.reason or "",
+                )
+                resolver_usage: Dict[str, Any] = {}
+                if decision.usage:
+                    resolver_usage["context_resolver"] = decision.usage
+                if pinned_context and memory:
+                    resolver_usage["pinned_context"] = {"message_id": memory.message_id}
+
+                if decision.action == "clarify":
+                    assistant_text = decision.clarification_question or (
+                        "Which previous result should I use for this follow-up?"
                     )
-                    last_summary = memory.snapshot.get("summary") or ""
-                    last_sql = memory.snapshot.get("sql") or ""
-                    decision = self.followup_resolver.resolve(question, last_summary, last_sql)
-                    explicit_ref = self.followup_resolver._has_explicit_reference(question) or pinned_context
-                    logger.info(
-                        "Follow-up resolver decision: %s (reason=%s)",
-                        decision.action,
-                        decision.reason or "",
+                    if chat_id:
+                        append_message(
+                            chat_id=chat_id,
+                            role="user",
+                            content=question,
+                            metadata={
+                                "kind": "clarify_request",
+                                "candidate_message_ids": [m.message_id for m in memories],
+                            },
+                        )
+                        append_message(
+                            chat_id=chat_id,
+                            role="assistant",
+                            content=assistant_text,
+                            metadata={
+                                "kind": "clarify",
+                                "reason": decision.reason,
+                                "candidate_message_ids": [m.message_id for m in memories],
+                            },
+                        )
+                    duration_ms = int((time.perf_counter() - start_time) * 1000)
+                    self._log_metrics(
+                        action="clarify",
+                        question=question,
+                        duration_ms=duration_ms,
+                        chat_id=chat_id,
+                        session_id=session_id,
+                        usage=resolver_usage or None,
                     )
+                    return QueryResponse(
+                        sql="",
+                        rows=[],
+                        figure=None,
+                        intent="clarify",
+                        suggested_tables=[],
+                        trace=[],
+                        plan=[],
+                        duration_ms=duration_ms,
+                        notes=[],
+                        result_snapshot=None,
+                        action="clarify",
+                        assistant_text=assistant_text,
+                        usage=resolver_usage or None,
+                    )
+
+                if decision.action in {"interpret", "refine"}:
+                    memory_by_id = {m.message_id: m for m in memories}
+                    target_memory = memory or memory_by_id.get(decision.target_message_id or "")
+                    if not target_memory:
+                        assistant_text = (
+                            "I'm not sure which previous result you mean. "
+                            "Please tell me which result to use."
+                        )
+                        if chat_id:
+                            append_message(
+                                chat_id=chat_id,
+                                role="user",
+                                content=question,
+                                metadata={
+                                    "kind": "clarify_request",
+                                    "candidate_message_ids": [m.message_id for m in memories],
+                                },
+                            )
+                            append_message(
+                                chat_id=chat_id,
+                                role="assistant",
+                                content=assistant_text,
+                                metadata={
+                                    "kind": "clarify",
+                                    "reason": "target_missing",
+                                    "candidate_message_ids": [m.message_id for m in memories],
+                                },
+                            )
+                        duration_ms = int((time.perf_counter() - start_time) * 1000)
+                        self._log_metrics(
+                            action="clarify",
+                            question=question,
+                            duration_ms=duration_ms,
+                            chat_id=chat_id,
+                            session_id=session_id,
+                            usage=resolver_usage or None,
+                            error="Target snapshot not found",
+                        )
+                        return QueryResponse(
+                            sql="",
+                            rows=[],
+                            figure=None,
+                            intent="clarify",
+                            suggested_tables=[],
+                            trace=[],
+                            plan=[],
+                            duration_ms=duration_ms,
+                            notes=["Target snapshot not found"],
+                            result_snapshot=None,
+                            action="clarify",
+                            assistant_text=assistant_text,
+                            usage=resolver_usage or None,
+                        )
+
+                    last_summary = target_memory.snapshot.get("summary") or ""
+                    last_sql = target_memory.snapshot.get("sql") or ""
+
                     if decision.action == "interpret":
                         logger.info("Routing to interpretation for follow-up.")
                         try:
                             interpretation = self.interpret_result(
                                 question,
                                 chat_id,
-                                message_id=memory.message_id,
+                                message_id=target_memory.message_id,
                                 session_id=session_id,
+                                pinned_context=pinned_context,
                             )
                             duration_ms = int((time.perf_counter() - start_time) * 1000)
-                            usage = {}
-                            if decision.usage:
-                                usage["followup_resolver"] = decision.usage
+                            usage = dict(resolver_usage)
                             if interpretation.get("usage"):
                                 usage["interpreter"] = interpretation["usage"]
-                            if pinned_context:
-                                usage["pinned_context"] = {"message_id": memory.message_id}
                             self._log_metrics(
                                 action="interpret",
                                 question=question,
@@ -905,7 +1021,7 @@ class QueryService:
                                 plan=[],
                                 duration_ms=duration_ms,
                                 notes=[],
-                                result_snapshot=memory.snapshot,
+                                result_snapshot=target_memory.snapshot,
                                 action="interpret",
                                 assistant_text=interpretation.get("text"),
                                 usage=usage or None,
@@ -922,23 +1038,20 @@ class QueryService:
                                 assistant_text=assistant_text,
                                 action="interpret_failed",
                                 reason=reason,
-                                source_message_id=memory.message_id,
+                                source_message_id=target_memory.message_id,
                                 tables_override=tables_override,
                                 execute=execute,
                                 plan_only=plan_only,
                             )
                             duration_ms = int((time.perf_counter() - start_time) * 1000)
-                            usage = {"followup_resolver": decision.usage} if decision.usage else None
-                            if pinned_context:
-                                usage = usage or {}
-                                usage["pinned_context"] = {"message_id": memory.message_id}
+                            usage = dict(resolver_usage)
                             self._log_metrics(
                                 action="interpret_failed",
                                 question=question,
                                 duration_ms=duration_ms,
                                 chat_id=chat_id,
                                 session_id=session_id,
-                                usage=usage,
+                                usage=usage or None,
                                 error=reason,
                             )
                             return QueryResponse(
@@ -951,92 +1064,76 @@ class QueryService:
                                 plan=[],
                                 duration_ms=duration_ms,
                                 notes=[reason] if reason else [],
-                                result_snapshot=memory.snapshot,
+                                result_snapshot=target_memory.snapshot,
                                 action="interpret_failed",
                                 assistant_text=assistant_text,
                                 fallback_question=question,
-                                usage=usage,
+                                usage=usage or None,
                             )
+
                     if decision.action == "refine":
-                        logger.info("Routing to follow-up handling.")
+                        logger.info("Routing to follow-up refinement.")
                         try:
-                            if pinned_context:
-                                available_cols = ", ".join(memory.snapshot.get("columns") or [])
-                                strategy = self.followup_strategy.resolve(
+                            available_cols = ", ".join(target_memory.snapshot.get("columns") or [])
+                            strategy = self.followup_strategy.resolve(
+                                question,
+                                last_summary,
+                                last_sql,
+                                available_cols or "(unknown)",
+                            )
+
+                            if strategy.strategy == "rewrite":
+                                rewritten = self.followup_rewriter.rewrite(
                                     question,
                                     last_summary,
                                     last_sql,
-                                    available_cols or "(unknown)",
                                 )
-                                if strategy.strategy == "rewrite":
-                                    rewritten = self.followup_rewriter.rewrite(
-                                        question,
-                                        last_summary,
-                                        last_sql,
-                                    )
-                                    result = self._refine_from_snapshot(
-                                        question,
-                                        chat_id=chat_id,
-                                        memory_snapshot=memory.snapshot,
-                                        execute=execute,
-                                        plan_only=plan_only,
-                                        session_id=session_id,
-                                        source_message_id=memory.message_id,
-                                        allow_joins=True,
-                                        refine_question=rewritten.question,
-                                        action_override="rewrite",
-                                        extra_metadata={
-                                            "rewrite_from_followup": True,
-                                            "rewrite_strategy": "rewrite",
-                                        },
-                                        audit_extra={
-                                            "rewrite_from_followup": True,
-                                            "rewrite_strategy": "rewrite",
-                                        },
-                                    )
-                                    duration_ms = int((time.perf_counter() - start_time) * 1000)
-                                    result.duration_ms = duration_ms
-                                    usage: Dict[str, Any] = {}
-                                    if decision.usage:
-                                        usage["followup_resolver"] = decision.usage
-                                    if strategy.usage:
-                                        usage["followup_strategy"] = strategy.usage
-                                    if rewritten.usage:
-                                        usage["followup_rewriter"] = rewritten.usage
-                                    if result.usage:
-                                        usage.update(result.usage)
-                                    usage["pinned_context"] = {"message_id": memory.message_id}
-                                    self._log_metrics(
-                                        action="rewrite",
-                                        question=question,
-                                        duration_ms=duration_ms,
-                                        chat_id=chat_id,
-                                        session_id=session_id,
-                                        usage=usage or None,
-                                    )
-                                    result.usage = usage or None
-                                    return result
+                                usage_prefix: Dict[str, Any] = dict(resolver_usage)
+                                if strategy.usage:
+                                    usage_prefix["followup_strategy"] = strategy.usage
+                                if rewritten.usage:
+                                    usage_prefix["followup_rewriter"] = rewritten.usage
+                                return self._run_new_query(
+                                    question=question,
+                                    effective_question=rewritten.question,
+                                    execute=execute,
+                                    plan_only=plan_only,
+                                    tables_override=tables_override,
+                                    chat_id=chat_id,
+                                    session_id=session_id,
+                                    action_override="rewrite",
+                                    start_time=start_time,
+                                    extra_metadata={
+                                        "rewrite_from_followup": True,
+                                        "source_message_id": target_memory.message_id,
+                                    },
+                                    audit_extra={
+                                        "rewrite_from_followup": True,
+                                        "source_message_id": target_memory.message_id,
+                                    },
+                                    usage_prefix=usage_prefix or None,
+                                )
 
                             result = self._refine_from_snapshot(
                                 question,
                                 chat_id=chat_id,
-                                memory_snapshot=memory.snapshot,
+                                memory_snapshot=target_memory.snapshot,
                                 execute=execute,
                                 plan_only=plan_only,
                                 session_id=session_id,
-                                source_message_id=memory.message_id,
-                                allow_joins=explicit_ref,
+                                source_message_id=target_memory.message_id,
+                                allow_joins=True,
+                                extra_metadata={"refine_strategy": "transform"},
+                                audit_extra={"refine_strategy": "transform"},
                             )
                             result.action = "refine"
                             duration_ms = int((time.perf_counter() - start_time) * 1000)
                             result.duration_ms = duration_ms
-                            usage: Dict[str, Any] = {}
-                            if decision.usage:
-                                usage["followup_resolver"] = decision.usage
+                            usage: Dict[str, Any] = dict(resolver_usage)
+                            if strategy.usage:
+                                usage["followup_strategy"] = strategy.usage
                             if result.usage:
                                 usage.update(result.usage)
-                            if pinned_context:
-                                usage["pinned_context"] = {"message_id": memory.message_id}
                             self._log_metrics(
                                 action="refine",
                                 question=question,
@@ -1050,56 +1147,40 @@ class QueryService:
                         except Exception as exc:
                             reason = str(exc)
                             logger.warning("Refinement failed: %s", exc)
-                            if pinned_context and "unknown column" in reason.lower():
-                                logger.info("Refine failed due to missing columns; attempting rewrite fallback.")
-                                try:
-                                    rewritten = self.followup_rewriter.rewrite(
-                                        question,
-                                        last_summary,
-                                        last_sql,
-                                    )
-                                    result = self._refine_from_snapshot(
-                                        question,
-                                        chat_id=chat_id,
-                                        memory_snapshot=memory.snapshot,
-                                        execute=execute,
-                                        plan_only=plan_only,
-                                        session_id=session_id,
-                                        source_message_id=memory.message_id,
-                                        allow_joins=True,
-                                        refine_question=rewritten.question,
-                                        action_override="rewrite_fallback",
-                                        extra_metadata={
-                                            "rewrite_from_followup": True,
-                                            "rewrite_fallback": True,
-                                        },
-                                        audit_extra={
-                                            "rewrite_from_followup": True,
-                                            "rewrite_fallback": True,
-                                        },
-                                    )
-                                    duration_ms = int((time.perf_counter() - start_time) * 1000)
-                                    result.duration_ms = duration_ms
-                                    usage: Dict[str, Any] = {}
-                                    if decision.usage:
-                                        usage["followup_resolver"] = decision.usage
-                                    if rewritten.usage:
-                                        usage["followup_rewriter"] = rewritten.usage
-                                    usage["pinned_context"] = {"message_id": memory.message_id}
-                                    if result.usage:
-                                        usage.update(result.usage)
-                                    self._log_metrics(
-                                        action="rewrite_fallback",
-                                        question=question,
-                                        duration_ms=duration_ms,
-                                        chat_id=chat_id,
-                                        session_id=session_id,
-                                        usage=usage or None,
-                                    )
-                                    result.usage = usage or None
-                                    return result
-                                except Exception as fallback_exc:
-                                    logger.warning("Rewrite fallback failed: %s", fallback_exc)
+                            try:
+                                rewritten = self.followup_rewriter.rewrite(
+                                    question,
+                                    last_summary,
+                                    last_sql,
+                                )
+                                usage_prefix: Dict[str, Any] = dict(resolver_usage)
+                                if rewritten.usage:
+                                    usage_prefix["followup_rewriter"] = rewritten.usage
+                                return self._run_new_query(
+                                    question=question,
+                                    effective_question=rewritten.question,
+                                    execute=execute,
+                                    plan_only=plan_only,
+                                    tables_override=tables_override,
+                                    chat_id=chat_id,
+                                    session_id=session_id,
+                                    action_override="rewrite_fallback",
+                                    start_time=start_time,
+                                    extra_metadata={
+                                        "rewrite_from_followup": True,
+                                        "rewrite_fallback": True,
+                                        "source_message_id": target_memory.message_id,
+                                    },
+                                    audit_extra={
+                                        "rewrite_from_followup": True,
+                                        "rewrite_fallback": True,
+                                        "source_message_id": target_memory.message_id,
+                                    },
+                                    usage_prefix=usage_prefix or None,
+                                )
+                            except Exception as fallback_exc:
+                                logger.warning("Rewrite fallback failed: %s", fallback_exc)
+
                             assistant_text = (
                                 "I couldn't safely refine the previous result. "
                                 "You can run this as a new query instead."
@@ -1110,23 +1191,20 @@ class QueryService:
                                 assistant_text=assistant_text,
                                 action="refine_failed",
                                 reason=reason,
-                                source_message_id=memory.message_id,
+                                source_message_id=target_memory.message_id,
                                 tables_override=tables_override,
                                 execute=execute,
                                 plan_only=plan_only,
                             )
                             duration_ms = int((time.perf_counter() - start_time) * 1000)
-                            usage = {"followup_resolver": decision.usage} if decision.usage else None
-                            if pinned_context:
-                                usage = usage or {}
-                                usage["pinned_context"] = {"message_id": memory.message_id}
+                            usage = dict(resolver_usage)
                             self._log_metrics(
                                 action="refine_failed",
                                 question=question,
                                 duration_ms=duration_ms,
                                 chat_id=chat_id,
                                 session_id=session_id,
-                                usage=usage,
+                                usage=usage or None,
                                 error=reason,
                             )
                             return QueryResponse(
@@ -1139,12 +1217,14 @@ class QueryService:
                                 plan=[],
                                 duration_ms=duration_ms,
                                 notes=[reason] if reason else [],
-                                result_snapshot=memory.snapshot,
+                                result_snapshot=target_memory.snapshot,
                                 action="refine_failed",
                                 assistant_text=assistant_text,
                                 fallback_question=question,
-                                usage=usage,
+                                usage=usage or None,
                             )
+
+                logger.info("No follow-up action selected; handling as new query.")
             else:
                 logger.info("No follow-up context found; handling as new query.")
 
