@@ -65,9 +65,15 @@ Schema context (from pgvector retrieval only):
         allowed_objects: Optional[List[str]] = None,
         schema_override: Optional[str] = None,
     ) -> SQLResult:
-        relevant = schema_override or ""
-        if not relevant and self.vector_store:
-            relevant = self.vector_store.get_relevant_schema(question, top_k=2)
+        if schema_override is not None:
+            relevant = schema_override
+        else:
+            relevant = ""
+            if self.vector_store:
+                try:
+                    relevant = self.vector_store.get_relevant_schema(question, top_k=2)
+                except Exception as exc:
+                    logger.warning("Schema retrieval failed: %s", exc)
         allowed = allowed_objects or self.kb.allowed_objects()
         system_prompt = self._system_prompt(allowed_objects=allowed, relevant_schema=relevant)
 

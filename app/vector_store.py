@@ -57,6 +57,21 @@ class VectorStore:
         resp = openai.Embedding.create(model=self.model, input=text_content)
         return resp["data"][0]["embedding"]
 
+    def _normalize_columns(self, columns_value: Any) -> List[Dict[str, Any]]:
+        if not columns_value:
+            return []
+        if isinstance(columns_value, str):
+            try:
+                columns_value = json.loads(columns_value)
+            except (TypeError, ValueError) as exc:
+                logger.warning("Failed to parse columns json: %s", exc)
+                return []
+        if isinstance(columns_value, dict):
+            return [columns_value]
+        if isinstance(columns_value, list):
+            return [c for c in columns_value if isinstance(c, dict)]
+        return []
+
     def ensure_extension_and_table(self) -> None:
         dim = settings.embedding_dimensions
         with get_connection() as conn:
@@ -151,23 +166,27 @@ class VectorStore:
             return ""
 
         query_vec = _embedding_to_literal(query_embedding)
-        with get_connection() as conn:
-            rows = conn.execute(
-                text(
-                    """
-                    SELECT name, object_type, schema_name, description, columns
-                    FROM schema_embeddings
-                    ORDER BY embedding <#> :query_vec
-                    LIMIT :k
-                    """
-                ),
-                {"query_vec": query_vec, "k": top_k},
-            ).fetchall()
+        try:
+            with get_connection() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT name, object_type, schema_name, description, columns
+                        FROM schema_embeddings
+                        ORDER BY embedding <#> :query_vec
+                        LIMIT :k
+                        """
+                    ),
+                    {"query_vec": query_vec, "k": top_k},
+                ).fetchall()
+        except Exception as exc:
+            logger.warning("Schema retrieval query failed: %s", exc)
+            return ""
 
         lines: List[str] = []
         for row in rows:
             name, obj_type, schema_name, description, columns_json = row
-            cols = columns_json or []
+            cols = self._normalize_columns(columns_json)
             col_text = "; ".join(f"{c.get('name')}: {c.get('description','')}" for c in cols)
             lines.append(f"{obj_type.upper()} {schema_name}.{name} — {description}")
             if col_text:
@@ -188,13 +207,14 @@ class VectorStore:
         entries: List[Dict[str, Any]] = []
         for row in rows:
             name, obj_type, schema_name, description, columns_json = row
+            columns = self._normalize_columns(columns_json)
             entries.append(
                 {
                     "name": name,
                     "object_type": obj_type,
                     "schema": schema_name,
                     "description": description,
-                    "columns": columns_json or [],
+                    "columns": columns,
                 }
             )
         return entries

@@ -75,12 +75,31 @@ class PlannerAgent:
             steps.append(PlanStep(step=f"step_{idx}", tool=tool, description=desc))
         return steps
 
+    def _has_required_sequence(self, plan_steps: List[PlanStep], intent: str) -> bool:
+        required = (
+            ["plan_viz", "validate_sql", "execute_sql", "render_viz"]
+            if intent == "visualization"
+            else ["draft_sql", "validate_sql", "execute_sql"]
+        )
+        tools = [step.tool for step in plan_steps]
+        cursor = -1
+        for req in required:
+            try:
+                cursor = tools.index(req, cursor + 1)
+            except ValueError:
+                return False
+        return True
+
     def plan(self, question: str, intent: str) -> List[PlanStep]:
         system_prompt = self._system_prompt(intent)
         logger.info("Planning steps for intent=%s question=%s", intent, question)
         tools = set(VIZ_PLAN_TOOLS if intent == "visualization" else SQL_PLAN_TOOLS)
 
         usage = None
+
+        if not settings.enable_planner:
+            logger.info("Planner disabled; using deterministic plan.")
+            return self._fallback_plan(intent)
 
         if self.use_client:
             resp = self.client.chat.completions.create(
@@ -124,11 +143,13 @@ class PlannerAgent:
                 plan_steps.append(PlanStep(step=f"step_{idx}", tool=tool, description=desc))
             if not plan_steps:
                 raise ValueError("Empty plan")
+            if not self._has_required_sequence(plan_steps, intent):
+                raise ValueError("Plan missing required tool sequence")
+            if usage:
+                logger.info("Planner usage (model=%s): %s", self.model, usage)
             return plan_steps
         except Exception as exc:
-            logger.warning("Planner parse failed (%s). Falling back to deterministic plan.", exc)
-            logger.info("Planner usage (model=%s): %s", self.model, usage)
+            logger.warning("Planner output invalid (%s). Falling back to deterministic plan.", exc)
+            if usage:
+                logger.info("Planner usage (model=%s): %s", self.model, usage)
             return self._fallback_plan(intent)
-        if usage:
-            logger.info("Planner usage (model=%s): %s", self.model, usage)
-        return plan_steps
