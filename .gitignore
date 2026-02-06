@@ -12,3 +12,4 @@ scripts/create_chat_tables.sql
 release_checklist.txt
 app.log
 query_test_scenarios.txt
+DOCUMENTATION.md
