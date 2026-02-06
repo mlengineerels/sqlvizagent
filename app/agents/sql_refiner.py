@@ -37,21 +37,33 @@ class SQLRefiner:
             self.client = None
             self.use_client = False
 
-    def _system_prompt(self, available_columns: List[str], strict: bool, allow_joins: bool) -> str:
+    def _system_prompt(
+        self,
+        available_columns: List[str],
+        hidden_columns: List[str],
+        strict: bool,
+        allow_joins: bool,
+    ) -> str:
         columns = ", ".join(available_columns) if available_columns else "(unknown)"
+        hidden = ", ".join(hidden_columns) if hidden_columns else "(none)"
         prompt = (
             "You are a SQL refiner for Postgres.\n"
             "Given a user follow-up and the previous SQL, return a refined SQL query.\n"
             "Rules:\n"
             "- Always define: WITH prev AS (<previous_sql>)\n"
             "- The final SELECT must include prev.\n"
+            "- Do NOT alias prev; keep it referenced as prev.\n"
             "- You MAY join base tables ONLY if required to add new columns not present in prev.\n"
             "- Any base table must be joined THROUGH prev (prev must be the left or primary source).\n"
             "- Do NOT rewrite the logic of prev unless explicitly requested.\n"
             "- Use only these columns from prev when possible: " + columns + "\n"
+            "- Hidden identity columns from prev: " + hidden + "\n"
+            "- You may ONLY join prev to other tables using hidden identity columns (prefix __pk_).\n"
+            "- Never join on titles/names unless explicitly unique and present.\n"
             "- SELECT-only. No DML/DDL.\n"
             "- Always include ORDER BY on a reasonable column from the selected columns unless the user explicitly asks for no sorting.\n"
             "- Use DISTINCT by default unless the user explicitly asks for duplicates.\n"
+            "- If required join keys aren't present, return: REFINE_NOT_POSSIBLE: <reason>.\n"
             "- Return ONLY the SQL query. No explanations."
         )
         if not allow_joins:
@@ -65,6 +77,7 @@ class SQLRefiner:
         question: str,
         previous_sql: str,
         available_columns: List[str],
+        hidden_columns: Optional[List[str]] = None,
         strict: bool = False,
         allow_joins: bool = False,
     ) -> RefinementResult:
@@ -72,7 +85,15 @@ class SQLRefiner:
             raise ValueError("Missing previous SQL for refinement.")
 
         messages = [
-            {"role": "system", "content": self._system_prompt(available_columns, strict, allow_joins)},
+            {
+                "role": "system",
+                "content": self._system_prompt(
+                    available_columns,
+                    hidden_columns or [],
+                    strict,
+                    allow_joins,
+                ),
+            },
             {
                 "role": "user",
                 "content": (

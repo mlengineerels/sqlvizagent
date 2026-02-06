@@ -17,6 +17,7 @@ class ColumnMetadataStore:
     def __init__(self, metadata_path: Path) -> None:
         self.metadata_path = metadata_path
         self._index: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = None
+        self._tables: Optional[Dict[str, Dict[str, Any]]] = None
         self._default_schema: Optional[str] = None
 
     def _load(self) -> None:
@@ -27,11 +28,13 @@ class ColumnMetadataStore:
         except Exception as exc:
             logger.warning("Failed to load metadata file: %s", exc)
             self._index = {}
+            self._tables = {}
             self._default_schema = None
             return
 
         self._default_schema = raw.get("defaultschema")
         index: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        tables: Dict[str, Dict[str, Any]] = {}
 
         for group in ("tables", "views"):
             for table in raw.get(group, []) or []:
@@ -51,8 +54,16 @@ class ColumnMetadataStore:
                         "description": col.get("description"),
                     }
                 index[fq_name.lower()] = columns
+                tables[fq_name.lower()] = {
+                    "name": name,
+                    "schema": schema,
+                    "type": table.get("type") or group[:-1],
+                    "description": table.get("description"),
+                    "columns": table.get("columns", []) or [],
+                }
 
         self._index = index
+        self._tables = tables
 
     def _format_table(self, table_expr: exp.Table) -> str:
         db = table_expr.db
@@ -69,6 +80,59 @@ class ColumnMetadataStore:
         if not schema and self._default_schema:
             schema = self._default_schema
         return f"{schema}.{name}" if schema else name
+
+    def format_table_expr(self, table_expr: exp.Table) -> str:
+        self._load()
+        return self._format_table(table_expr)
+
+    def table_columns(self, table_name: str) -> List[str]:
+        self._load()
+        if not self._index:
+            return []
+        table = (table_name or "").lower()
+        cols = self._index.get(table) or {}
+        return [c.get("name", "").lower() for c in cols.values() if c.get("name")]
+
+    def infer_primary_key(self, table_name: str) -> List[str]:
+        self._load()
+        if not self._tables:
+            return []
+        table = (table_name or "").lower()
+        info = self._tables.get(table)
+        if not info:
+            return []
+        cols = info.get("columns") or []
+        candidates: List[str] = []
+        for col in cols:
+            name = (col.get("name") or "").strip()
+            if not name:
+                continue
+            desc = (col.get("description") or "").lower()
+            if "primary key" in desc or "(pk" in desc or " pk" in desc:
+                candidates.append(name)
+        short_name = (table.split(".")[-1] or "").strip()
+        singular = short_name[:-1] if short_name.endswith("s") and len(short_name) > 1 else short_name
+        if singular:
+            candidates.append(f"{singular}id")
+        candidates.append("id")
+        col_names = {c.get("name", "").lower() for c in cols if c.get("name")}
+        deduped: List[str] = []
+        for candidate in candidates:
+            if not candidate:
+                continue
+            if candidate.lower() in col_names and candidate.lower() not in {c.lower() for c in deduped}:
+                deduped.append(candidate)
+        return deduped
+
+    def infer_entity_type(self, table_name: str) -> Optional[str]:
+        if not table_name:
+            return None
+        short_name = table_name.split(".")[-1]
+        if not short_name:
+            return None
+        if short_name.endswith("s") and len(short_name) > 1:
+            return short_name[:-1]
+        return short_name
 
     def _table_names_from_sql(self, sql: str) -> Set[str]:
         if not sql:

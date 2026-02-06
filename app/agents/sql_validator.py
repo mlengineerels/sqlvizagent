@@ -116,6 +116,8 @@ class SQLValidator:
         for col in expr.find_all(exp.Column):
             if self.ignore_cte_columns and col.find_ancestor(exp.CTE):
                 continue
+            if self.ignore_cte_columns and col.table and col.table.lower() in cte_names:
+                continue
             name = col.name
             if not name or name == "*":
                 continue

@@ -1,7 +1,7 @@
 # app/api/http.py
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -43,13 +43,17 @@ class ResultSnapshot(BaseModel):
     sql: str
     row_count: int
     rows_sample: List[Dict[str, Any]]
-    columns: List[str]
+    columns: Union[List[str], Dict[str, List[str]]]
     stats: Optional[Dict[str, Any]] = None
     chart: Optional[Dict[str, Any]] = None
     summary: Optional[str] = None
     timestamp: datetime
     truncated: bool = False
     column_info: Optional[Dict[str, List[Dict[str, Any]]]] = None
+    entity_type: Optional[str] = None
+    primary_key: Optional[List[str]] = None
+    base_relations: Optional[List[str]] = None
+    sql_signature: Optional[Dict[str, Any]] = None
 
 
 class QueryResult(BaseModel):

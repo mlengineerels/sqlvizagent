@@ -9,6 +9,12 @@ import re
 
 from app.config import settings
 
+try:
+    from sqlglot import exp, parse_one
+except ImportError:  # pragma: no cover
+    exp = None  # type: ignore
+    parse_one = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 engine: Engine = create_engine(
@@ -63,7 +69,20 @@ def execute_readonly_query(
 
     if allowed_columns:
         cols_lower = set(c.lower() for c in allowed_columns)
+        cte_names = set()
+        if parse_one and exp:
+            try:
+                expr = parse_one(cleaned, read="postgres")
+                cte_names = {
+                    cte.alias_or_name.lower()
+                    for cte in expr.find_all(exp.CTE)
+                    if cte.alias_or_name
+                }
+            except Exception:
+                cte_names = set()
         for _, col in re.findall(r"([a-zA-Z_][\\w]*)\\.([a-zA-Z_][\\w]*)", cleaned):
+            if cte_names and _.lower() in cte_names:
+                continue
             if col.lower() not in cols_lower:
                 raise ValueError(f"Query references unknown column: {col}")
 

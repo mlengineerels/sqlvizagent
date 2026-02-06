@@ -180,7 +180,7 @@ class Orchestrator:
                 message_id=m.message_id,
                 summary=m.snapshot.get("summary") or "",
                 sql=m.snapshot.get("sql") or "",
-                columns=m.snapshot.get("columns") or [],
+                columns=self.service._snapshot_display_columns(m.snapshot),
                 timestamp=m.snapshot.get("timestamp"),
             )
             for m in state.memories
@@ -477,41 +477,47 @@ class Orchestrator:
     ):
         logger.info("Routing to follow-up refinement.")
         try:
-            available_cols = ", ".join(target_memory.snapshot.get("columns") or [])
+            available_cols = ", ".join(
+                self.service._snapshot_display_columns(target_memory.snapshot)
+            )
             strategy = self.service.followup_strategy.resolve(
                 state.question,
                 last_summary,
                 last_sql,
                 available_cols or "(unknown)",
             )
-
-            if strategy.strategy == "rewrite":
-                rewritten = self.service.followup_rewriter.rewrite(
+            usage_prefix: Dict[str, Any] = dict(resolver_usage)
+            if strategy.usage:
+                usage_prefix["followup_strategy"] = strategy.usage
+            can_refine, reason = self.service._can_refine_snapshot(
+                target_memory.snapshot,
+                strategy.strategy,
+            )
+            if not can_refine:
+                fallback_question = self.service._build_rewrite_fallback_question(
                     state.question,
-                    last_summary,
-                    last_sql,
+                    target_memory.snapshot,
                 )
-                usage_prefix: Dict[str, Any] = dict(resolver_usage)
-                if strategy.usage:
-                    usage_prefix["followup_strategy"] = strategy.usage
-                if rewritten.usage:
-                    usage_prefix["followup_rewriter"] = rewritten.usage
                 return self.service._run_new_query(
                     question=state.question,
-                    effective_question=rewritten.question,
+                    effective_question=fallback_question,
                     execute=state.execute,
                     plan_only=state.plan_only,
                     tables_override=state.tables_override,
                     chat_id=state.chat_id,
                     session_id=state.session_id,
-                    action_override="rewrite",
+                    action_override="rewrite_fallback",
                     start_time=state.start_time,
                     extra_metadata={
                         "rewrite_from_followup": True,
+                        "rewrite_fallback": True,
+                        "rewrite_reason": reason,
                         "source_message_id": target_memory.message_id,
                     },
                     audit_extra={
                         "rewrite_from_followup": True,
+                        "rewrite_fallback": True,
+                        "rewrite_reason": reason,
                         "source_message_id": target_memory.message_id,
                     },
                     usage_prefix=usage_prefix or None,
@@ -551,17 +557,14 @@ class Orchestrator:
             reason = str(exc)
             logger.warning("Refinement failed: %s", exc)
             try:
-                rewritten = self.service.followup_rewriter.rewrite(
+                fallback_question = self.service._build_rewrite_fallback_question(
                     state.question,
-                    last_summary,
-                    last_sql,
+                    target_memory.snapshot,
                 )
                 usage_prefix: Dict[str, Any] = dict(resolver_usage)
-                if rewritten.usage:
-                    usage_prefix["followup_rewriter"] = rewritten.usage
                 return self.service._run_new_query(
                     question=state.question,
-                    effective_question=rewritten.question,
+                    effective_question=fallback_question,
                     execute=state.execute,
                     plan_only=state.plan_only,
                     tables_override=state.tables_override,
@@ -572,11 +575,13 @@ class Orchestrator:
                     extra_metadata={
                         "rewrite_from_followup": True,
                         "rewrite_fallback": True,
+                        "rewrite_reason": reason,
                         "source_message_id": target_memory.message_id,
                     },
                     audit_extra={
                         "rewrite_from_followup": True,
                         "rewrite_fallback": True,
+                        "rewrite_reason": reason,
                         "source_message_id": target_memory.message_id,
                     },
                     usage_prefix=usage_prefix or None,
