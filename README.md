@@ -35,9 +35,10 @@ FastAPI service that routes natural language questions to SQL or visualizations,
 
 ## UI
 - Chat-style interface at `/`: shows SQL, tabular rows (first 20), and inline Plotly chart for viz intents plus a plan-only toggle and a trace pane to inspect planner/controller steps.
+![UI](images/image.png)
 
 ## UI example
-<img src="docs/screenshots/ui-example.png" alt="UI example" width="1000" />
+<img src="images/example.png" alt="UI example" width="1000" />
 
 ## Env/config
 - OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL` (SQL), `OPENAI_INTENT_MODEL` (intent), `OPENAI_EMBEDDING_MODEL`.
